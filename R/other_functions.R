@@ -607,45 +607,47 @@ c1_tables <- build_pedigree(
 )
 
 # --- 4. LOAD ACTUAL DATABASE EXPORTS ---
-db_fams <- read_excel(file.path(data_dir, "Backwards Selected Fullsib P96-P99 experiments", "DMS_all_fams.xlsx"))
-db_genos <- read_excel(file.path(data_dir, "Backwards Selected Fullsib P96-P99 experiments", "DMS_all_genotypes.xlsx"))
+db_fams   <- read_excel(file.path(data_dir, "Backwards Selected Fullsib P96-P99 experiments", "DMS_all_fams.xlsx"))
+db_genos  <- read_excel(file.path(data_dir, "Backwards Selected Fullsib P96-P99 experiments", "DMS_all_genotypes.xlsx"))
 db_groups <- read_excel(file.path(data_dir, "Backwards Selected Fullsib P96-P99 experiments", "DMS_Groups.xlsx"))
 
-# Dynamically extract clean vectors of names currently in the database
-db_fam_list <- db_fams[[grep("(?i)family.*name", names(db_fams), value = TRUE)[1]]]
-db_geno_list <- db_genos[[grep("(?i)name", names(db_genos), value = TRUE)[1]]]
+# Extract clean vectors of names currently in the database
+db_fam_list   <- db_fams[[grep("(?i)family.*name", names(db_fams), value = TRUE)[1]]]
+db_geno_list  <- db_genos[[grep("(?i)name", names(db_genos), value = TRUE)[1]]]
 db_group_list <- db_groups[[grep("(?i)name", names(db_groups), value = TRUE)[1]]]
 
-# --- 5. THE TRUE ANTI-JOIN (Filter against live database) ---
-cat("\n--- BUILDING TRUE UPLOAD FILES ---\n")
+# --- 5. THE TRUE ANTI-JOIN (Now including Controls) ---
+cat("\n--- BUILDING TRUE UPLOAD FILES (Including Controls) ---\n")
 
-# A. Families (Strictly those not in DB)
-true_families_export <- c1_tables$families %>% filter(!Family_name %in% db_fam_list)
+# A. Families
+# We include ALL candidate families from c1_tables, then filter by DB
+true_families_export <- c1_tables$families %>% 
+  filter(!Family_name %in% db_fam_list)
 
-# Individuals ('I')
+# B. Extract ALL parents required by those specific families
 needed_mums_I <- true_families_export %>% filter(Mum_type == "I") %>% pull(Mum_name)
 needed_dads_I <- true_families_export %>% filter(Dad_type == "I") %>% pull(Dad_name)
 required_parents_I <- unique(c(needed_mums_I, needed_dads_I))
 
-# Groups ('G')
 needed_mums_G <- true_families_export %>% filter(Mum_type == "G") %>% pull(Mum_name)
 needed_dads_G <- true_families_export %>% filter(Dad_type == "G") %>% pull(Dad_name)
 required_parents_G <- unique(c(needed_mums_G, needed_dads_G))
 
-# C. Build Verified Genotypes and Groups
+# C. Build Verified Genotypes
 true_genotypes_export <- c1_tables$genotypes %>%
   filter(Genotype_name %in% required_parents_I) %>%
   filter(!Genotype_name %in% db_geno_list) %>%
   distinct(Genotype_name, .keep_all = TRUE)
 
+# D. Build Verified Groups (This now automatically handles the Controls)
 true_groups_export <- c1_tables$groups %>%
   filter(Group_name %in% required_parents_G) %>%
   filter(!Group_name %in% db_group_list) %>%
   distinct(Group_name, .keep_all = TRUE)
 
-cat("Verified Groups to upload:    ", nrow(true_groups_export), "\n")
-cat("Verified Genotypes to upload: ", nrow(true_genotypes_export), "\n")
-cat("Verified Families to upload:  ", nrow(true_families_export), "\n")
+cat("Verified Groups to upload (New Controls + Founders): ", nrow(true_groups_export), "\n")
+cat("Verified Genotypes to upload:                         ", nrow(true_genotypes_export), "\n")
+cat("Verified Families to upload (New Controls + Trials):  ", nrow(true_families_export), "\n")
 
 # --- 6. ORPHAN CHECK ---
 cat("\n--- ORPHAN CHECK ---\n")
@@ -725,9 +727,8 @@ ggraph(pedigree_graph, layout = 'sugiyama') +
   labs(title = "Verified Cycle 1 Pedigree Network", subtitle = "Ready for Upload")
 
 
-# ==========================================
+
 # PLOT 2: ENTIRE PEDIGREE (Cycle 1 + Database)
-# ==========================================
 # 1. BIND CYCLE 1 WITH LIVE DATABASE
 # We coerce everything to character to prevent <double> vs <character> mismatch errors
 db_fams_char <- db_fams %>% mutate(across(everything(), as.character))
