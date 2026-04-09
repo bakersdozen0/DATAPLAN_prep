@@ -670,15 +670,13 @@ write_csv(true_families_export, file.path(data_dir, "Pedigree", "Verified_Cycle1
 
 
 #### plot pedigree ####
-#### plot pedigree ####
 library(dplyr)
 library(readr)
 library(igraph)
 library(ggraph)
 
-# ==========================================
-# PLOT 1: VERIFIED CYCLE 1 PEDIGREE ONLY
-# ==========================================
+
+# PLOT 1: VERIFIED CYCLE 1 PEDIGREE ONLY ##
 
 # 1. LOAD ALL VERIFIED PEDIGREE FILES (Corrected Groups filename)
 families  <- read_csv(file.path(data_dir,"Pedigree", "Verified_Cycle1_Families_Import.csv"), show_col_types = FALSE)
