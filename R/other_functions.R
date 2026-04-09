@@ -616,15 +616,15 @@ db_fam_list   <- db_fams[[grep("(?i)family.*name", names(db_fams), value = TRUE)
 db_geno_list  <- db_genos[[grep("(?i)name", names(db_genos), value = TRUE)[1]]]
 db_group_list <- db_groups[[grep("(?i)name", names(db_groups), value = TRUE)[1]]]
 
-# --- 5. THE TRUE ANTI-JOIN (Now including Controls) ---
-cat("\n--- BUILDING TRUE UPLOAD FILES (Including Controls) ---\n")
+# --- 5. THE TRUE ANTI-JOIN (Now explicitly verifying Controls in Families) ---
+cat("\n--- BUILDING TRUE UPLOAD FILES ---\n")
 
-# A. Families
-# We include ALL candidate families from c1_tables, then filter by DB
+# A. Families (Trials + Controls + Fillers)
+# This uses the database export to filter out ANY family already in the system
 true_families_export <- c1_tables$families %>% 
   filter(!Family_name %in% db_fam_list)
 
-# B. Extract ALL parents required by those specific families
+# B. Extract ALL parents required by these specific families
 needed_mums_I <- true_families_export %>% filter(Mum_type == "I") %>% pull(Mum_name)
 needed_dads_I <- true_families_export %>% filter(Dad_type == "I") %>% pull(Dad_name)
 required_parents_I <- unique(c(needed_mums_I, needed_dads_I))
@@ -639,16 +639,15 @@ true_genotypes_export <- c1_tables$genotypes %>%
   filter(!Genotype_name %in% db_geno_list) %>%
   distinct(Genotype_name, .keep_all = TRUE)
 
-# D. Build Verified Groups (This now automatically handles the Controls)
+# D. Build Verified Groups (Filtering for new Controls and new Selection Groups)
 true_groups_export <- c1_tables$groups %>%
   filter(Group_name %in% required_parents_G) %>%
   filter(!Group_name %in% db_group_list) %>%
   distinct(Group_name, .keep_all = TRUE)
 
-cat("Verified Groups to upload (New Controls + Founders): ", nrow(true_groups_export), "\n")
-cat("Verified Genotypes to upload:                         ", nrow(true_genotypes_export), "\n")
-cat("Verified Families to upload (New Controls + Trials):  ", nrow(true_families_export), "\n")
-
+cat("Verified Groups to upload:    ", nrow(true_groups_export), "\n")
+cat("Verified Genotypes to upload: ", nrow(true_genotypes_export), "\n")
+cat("Verified Families to upload:  ", nrow(true_families_export), "\n")
 # --- 6. ORPHAN CHECK ---
 cat("\n--- ORPHAN CHECK ---\n")
 orphans_I <- required_parents_I[!(required_parents_I %in% db_geno_list | required_parents_I %in% true_genotypes_export$Genotype_name)]
