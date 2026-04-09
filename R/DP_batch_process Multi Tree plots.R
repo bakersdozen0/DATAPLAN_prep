@@ -1,6 +1,10 @@
 #### #### #### ####
 #### #### #### ####
  
+data_dir<-"//forestresearch.gov.uk/shares/CSFCC/Forest Resource and Product Assessment and Improvement/NRS-Tree Improvement/CONIFERS/SITKA SPRUCE/psi_DATAPLAN_prep"
+
+
+
 library(usethis)
 library(tidyverse)
 library(readxl)
@@ -201,8 +205,7 @@ generate_pdf_report <- function(long_data, wide_data, exp_name, multi_age_prefix
     
     for (base_t in base_traits) {
       # Skip traits where shrinkage is irrelevant or expected
-      if (str_detect(base_t, "(?i)(Sur|Resi|Detrended|Ampli|Resistance|Resist|Crack|Form)")) next
-      
+      if (str_detect(base_t, "(?i)(Sur|Resi|Detrended|Ampli|Resistance|Resist|Crack|Form|Br|St|Pil)")) next      
       # 2. STRICTLY match only traits with this exact base and an age number
       # e.g., "^HGT_\\d+$" finds HGT_10 and HGT_15, but ignores HGT_ADJ_10
       regex_pattern <- paste0("^", base_t, "_\\d+$")
@@ -463,7 +466,7 @@ map_interior_trees <- function(tree_idx, subset_size, full_size) {
 # PART 1: LOAD TRANSLATION MAP & FOLDERS ####
 # ============================================================================
 
-trait_path <- here("PPGTraits_UK.xlsm")
+trait_path <- file.path(data_dir,"PPGTraits_UK.xlsm")
 
 if (file.exists(trait_path)) {
   trait_map <- read_excel(trait_path, sheet = "StdTraits") %>%
@@ -488,19 +491,19 @@ if (file.exists(trait_path)) {
   stop(paste("Error: Trait file not found at:", trait_path))
 }
 
-all_dirs <- list.dirs(path = here("High GCA Fullsib P85-P87 experiments"), recursive = FALSE, full.names = FALSE)
+all_dirs <- list.dirs(path = file.path(data_dir,"High GCA Fullsib P85-P87 experiments"), recursive = FALSE, full.names = FALSE)
 
 experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", ".Rproj.user"))
 message(paste("Found", length(experiments_to_process), "folders to check."))
 
 # or do single 
-experiments_to_process <-c("Radnor 55","Arecleoch 12")
+experiments_to_process <-c("Spadeadam 7")
 
 # ============================================================================
 # PART 2: MAIN PROCESSING LOOP ####
 # ============================================================================
 
-root_path<-here("High GCA Fullsib P85-P87 experiments")
+root_path<-file.path(data_dir,"High GCA Fullsib P85-P87 experiments")
 
 for (curr_exp in experiments_to_process) {
   
@@ -508,7 +511,7 @@ for (curr_exp in experiments_to_process) {
     message(paste("\n=========================================="))
     message(paste("Processing Folder:", curr_exp))
     
-    exp_path <- here(root_path, curr_exp)
+    exp_path <- file.path(data_dir,root_path, curr_exp)
     file_prefix <- str_replace_all(curr_exp, " ", "_")
     
     # Initialize variables
@@ -862,7 +865,7 @@ for (curr_exp in experiments_to_process) {
       # 1. NEW: Completely ignore ordinal and binary traits
       filter(!Is_Ordinal, !Is_Binary_Resi) %>%
       # 2. NEW: Explicitly added Br and St to the regex exclusion list
-      filter(!str_detect(Trait, "(?i)(Sur|Resi|Detrended|Ampli|Resistance|Resist|Crack|Form|Br|St)")) %>%
+      filter(!str_detect(Trait, "(?i)(Sur|Resi|Detrended|Ampli|Resistance|Resist|Crack|Form|Br|St|Pil)")) %>%
       mutate(
         Base_Trait = str_remove(Trait, "_\\d+$"),
         Age_Num = suppressWarnings(as.numeric(str_extract(Trait, "\\d+$")))
@@ -949,20 +952,51 @@ for (curr_exp in experiments_to_process) {
     }
     
     # Genetic info is Plot-level only
+    # Genetic info is Plot-level only
     if (!is.null(genetic_info)) final_wide_with_flags <- left_join(final_wide_with_flags, genetic_info, by = "Plot")
     if (!is.null(spatial_info)) final_wide_with_flags <- left_join(final_wide_with_flags, spatial_info, by = c("Plot", "Tree"))
     
-    gen_cols <- c("Block","SubBlock", "Prow", "Ppos", "Family_name", "Alive", "Validation_record")
-    existing_gen_cols <- intersect(names(final_wide_with_flags), gen_cols)
-    remaining_cols <- sort(setdiff(names(final_wide_with_flags), c("Plot", "Tree", existing_gen_cols)))
+    # Explicitly define the exact metadata order you requested
+    metadata_cols <- c("Validation_record", "Alive", "Block", "SubBlock", "Family_name", "Prow", "Ppos")
     
-    # NEW: Added arrange(Plot, Tree) to sort the rows perfectly
+    # Keep only the ones that actually exist in the dataframe (preserves your exact order)
+    existing_meta_cols <- intersect(metadata_cols, names(final_wide_with_flags))
+    
+    # 1. Get all trait/reject columns (everything not Plot, Tree, or the metadata)
+    raw_remaining <- setdiff(names(final_wide_with_flags), c("Plot", "Tree", metadata_cols))
+    
+    # 2. Build a sorting dataframe to parse and logically sort
+    col_sorting_df <- tibble(col_name = raw_remaining) %>%
+      mutate(
+        # Identify if it's a reject column
+        is_reject = str_detect(col_name, "(?i)_reject$"),
+        # Strip the reject tag to get the core trait name + age
+        base_full = str_remove(col_name, "(?i)_reject$"),
+        # Extract the trailing numbers as a REAL numeric value
+        age_num = suppressWarnings(as.numeric(str_extract(base_full, "\\d+$"))),
+        # Replace NA ages (traits without an age tag) with 0 so they sort to the front
+        age_sort = replace_na(age_num, 0),
+        # Extract just the letters/base of the trait
+        base_trait = str_remove(base_full, "_\\d+$"),
+        # Identify if it is a survival trait
+        is_survival = str_detect(base_trait, "(?i)^Sur")
+      ) %>%
+      # 3. Sort logic:
+      # - Measurements first, Survival last (is_survival: FALSE -> TRUE)
+      # - Then by Age (youngest to oldest)
+      # - Then alphabetically by trait (e.g., br 06 comes before dm 06)
+      # - Finally, the trait itself before its reject flag (is_reject: FALSE -> TRUE)
+      arrange(is_survival, age_sort, base_trait, is_reject)
+    
+    # Extract the properly ordered column names
+    remaining_cols <- col_sorting_df$col_name
+    
+    # Combine and apply to the dataframe
     final_wide_with_flags <- final_wide_with_flags %>% 
-      select(all_of(c("Plot", "Tree", existing_gen_cols, remaining_cols))) %>%
+      select(all_of(c("Plot", "Tree", existing_meta_cols, remaining_cols))) %>%
       arrange(Plot, Tree)
     
     write_csv(final_wide_with_flags, file.path(exp_path, paste0(curr_exp, "_Full_Data_With_Flags.csv")), na = "")
-    
     # PDF & Stats
     current_traits <- unique(final_long_dedup$Trait)
     prefixes_found <- unique(final_long_dedup$Prefix)
@@ -980,7 +1014,7 @@ for (curr_exp in experiments_to_process) {
       summarise(N_Valid = sum(!is.na(Value_Num)), Mean = mean(Value_Num, na.rm=TRUE), 
                 Std_Dev = sd(Value_Num, na.rm=TRUE), Min = min(Value_Num, na.rm=TRUE), Max = max(Value_Num, na.rm=TRUE),
                 CV_Pct = (sd(Value_Num, na.rm=TRUE)/mean(Value_Num, na.rm=TRUE))*100) %>%
-      mutate(across(where(is.numeric), ~ round(., 2)))
+      mutate(across(wfile.path(data_dir,is.numeric), ~ round(., 2)))
     
     write_csv(stats_df, file.path(exp_path, paste0(curr_exp, "_Stats.csv")), na = "")
     
