@@ -1055,13 +1055,13 @@ for (curr_exp in experiments_to_process) {
       select(all_of(c("Plot", "Tree", existing_meta_cols, remaining_cols))) %>%
       arrange(Plot, Tree)
     
-    write_csv(final_wide_with_flags, file.path(exp_path, paste0(curr_exp, "_Full_Data_With_Flags.csv")), na = "")
+    write_csv(final_wide_with_flags, file.path(exp_path, paste0(file_prefix, "_Full_Data_With_Flags.csv")), na = "")
     # PDF & Stats
     current_traits <- unique(final_long_dedup$Trait)
     prefixes_found <- unique(final_long_dedup$Prefix)
     
     try({
-      pdf(file.path(exp_path, paste0(curr_exp, "_graphs.pdf")), width = 8, height = 11)
+      pdf(file.path(exp_path, paste0(file_prefix, "_graphs.pdf")), width = 8, height = 11)
       generate_pdf_report(final_long_dedup, exp_data_wide_numeric, curr_exp, prefixes_found, current_traits)
       dev.off()
     })
@@ -1077,9 +1077,9 @@ for (curr_exp in experiments_to_process) {
     
     write_csv(stats_df, file.path(exp_path, paste0(curr_exp, "_Stats.csv")), na = "")
     
-    # ----------------------------------------------------------------------------
+    #
     # STEP 6: XML GENERATION
-    # ----------------------------------------------------------------------------
+    #
     xml_data <- data_with_outliers %>%
       group_by(Trait) %>%
       mutate(
@@ -1119,7 +1119,7 @@ for (curr_exp in experiments_to_process) {
       ) %>%
       arrange(Trait)
     
-    xml_filename <- file.path(exp_path, paste0(curr_exp, "_Traits.xml"))
+    xml_filename <- file.path(exp_path, paste0(file_prefix, "_Traits.xml"))
     
     xml_content <- c(
       "<trial>",
