@@ -505,7 +505,7 @@ experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", "
 message(paste("Found", length(experiments_to_process), "folders to check."))
 
 # or do single 
-experiments_to_process <-c("Speyside 7")
+experiments_to_process <-c("Brecon 15")
 
 # ============================================================================
 # PART 2: MAIN PROCESSING LOOP ####
@@ -648,6 +648,39 @@ for (curr_exp in experiments_to_process) {
         filter(Plot_Check %in% genetic_info$Plot) %>%
         select(-Plot_Check)
     }
+    
+    # --- NEW: Check for and resolve repeat measurements within the same age ---
+    # Safely ensure a Remarks column exists so we can query it without error
+    if (!"Remarks" %in% names(raw_data)) {
+      raw_data <- raw_data %>% mutate(Remarks = NA_character_)
+    }
+    
+    # Identify duplicates based on Plot, Tree, Assessment, and Year
+    duplicate_check <- raw_data %>%
+      group_by(Plot, InferredTreePosition, Assessment, `Assessment Year`) %>%
+      mutate(Measure_Count = n()) %>%
+      ungroup()
+    
+    # If any duplicates exist, warn the user and filter them
+    if (any(duplicate_check$Measure_Count > 1)) {
+      # Count unique tree/trait combinations that have duplicates
+      num_dupes <- duplicate_check %>% filter(Measure_Count > 1) %>% distinct(Plot, InferredTreePosition, Assessment) %>% nrow()
+      message(paste("    -> WARNING:", num_dupes, "trees have repeat measurements in a single year! Prioritizing 'Direction SE'..."))
+      
+      raw_data <- duplicate_check %>%
+        group_by(Plot, InferredTreePosition, Assessment, `Assessment Year`) %>%
+        arrange(
+          # Sort so that rows containing "Direction SE" (case-insensitive) jump to the top
+          desc(str_detect(replace_na(Remarks, ""), "(?i)Direction SE"))
+        ) %>%
+        slice(1) %>% # Take the top row (either the SE one, or just the first one if neither match)
+        ungroup() %>%
+        select(-Measure_Count)
+    } else {
+      # No duplicates, just clean up the temporary column
+      raw_data <- duplicate_check %>% select(-Measure_Count)
+    }
+    # 
     
     # --- Create base long format and apply spatial correction ---
     exp_data_long <- raw_data %>%

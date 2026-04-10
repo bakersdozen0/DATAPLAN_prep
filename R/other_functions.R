@@ -64,7 +64,75 @@ final_report <- trial_analysis %>%
 print(final_report, n = 100)
 write.csv(final_report, file.path(data_dir,"ASCII_initial_report.csv"))
 
+## 2: Count instances where AV was measured more than once per stem (see ASCII remarks; some instances of 
+## instances where it was taken on both NE and SW side)
 
+library(tidyverse)
+library(readxl)
+library(fs)
+
+# Define paths
+data_dir <- "//forestresearch.gov.uk/shares/CSFCC/Forest Resource and Product Assessment and Improvement/NRS-Tree Improvement/CONIFERS/SITKA SPRUCE/psi_DATAPLAN_prep"
+root_path <- file.path(data_dir, "High GCA Fullsib P85-P87 experiments")
+
+# Find all ASCII Excel files in the subfolders
+ascii_files <- dir_ls(root_path, recurse = TRUE, regexp = "(?i)_ASCII\\.xlsx$")
+
+message(paste("Found", length(ascii_files), "ASCII files. Scanning for duplicate Av measurements..."))
+
+# Initialize an empty list to store results
+duplicate_av_list <- list()
+
+for (file_path in ascii_files) {
+  # Extract experiment name from the folder path for our report
+  exp_name <- basename(dirname(file_path))
+  
+  tryCatch({
+    # Read the raw data safely as text
+    raw_data <- read_excel(file_path, col_types = "text")
+    
+    # Ensure the required columns exist
+    req_cols <- c("Plot", "InferredTreePosition", "Assessment", "Assessment Year")
+    if (all(req_cols %in% names(raw_data))) {
+      
+      # Group by tree and age, and count the occurrences
+      duplicates <- raw_data %>%
+        filter(str_detect(Assessment, "(?i)^AV")) %>% # Isolate Av measurements
+        group_by(Plot, InferredTreePosition, Assessment, `Assessment Year`) %>%
+        summarise(Measurement_Count = n(), .groups = "drop") %>%
+        filter(Measurement_Count > 1) # Keep only the ones with multiple readings
+      
+      if (nrow(duplicates) > 0) {
+        duplicates <- duplicates %>% mutate(Experiment = exp_name)
+        duplicate_av_list[[exp_name]] <- duplicates
+      }
+    }
+  }, error = function(e) {
+    message(paste("  -> Skipped or Error reading", exp_name, ":", e$message))
+  })
+}
+
+# Compile and print the results
+if (length(duplicate_av_list) > 0) {
+  all_duplicates <- bind_rows(duplicate_av_list) %>%
+    select(Experiment, Plot, Tree = InferredTreePosition, Assessment, Age = `Assessment Year`, Measurement_Count) %>%
+    arrange(Experiment, as.numeric(Plot), as.numeric(Tree))
+  
+  message("\n==========================================")
+  message("Scan Complete! Found repeat Av measurements in the following trials:")
+  print(unique(all_duplicates$Experiment))
+  
+  message("\nHere is a preview of the duplicates:")
+  print(head(all_duplicates, 15))
+  
+  # Export the full report to a CSV in your root folder
+  out_path <- file.path(root_path, "Repeat_Av_Scan_Results.csv")
+  write_csv(all_duplicates, out_path)
+  message(paste("\nFull diagnostic report saved to:", out_path))
+  
+} else {
+  message("\nScan Complete! No repeat Av measurements found in any of the checked files.")
+}
 
 ## Counting families/dams & sires: ####
 
