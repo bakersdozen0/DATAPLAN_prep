@@ -13,9 +13,10 @@ library(gridExtra)
 library(grid)
 library(here)
 
-# ============================================================================
+# # # # # # # # # # # # # # # # # # # # # # # 
 # PART 0: HELPER FUNCTIONS #### 
-# ============================================================================
+# # # # # # # # # # # # # # # # # # # # # # # 
+
 # --- 1. Parse Design File (TXT) ---
 parse_long_design_file <- function(filepath, exp_prefix) {
   raw_lines <- readLines(filepath)
@@ -473,16 +474,13 @@ map_interior_trees <- function(tree_idx, subset_size, full_size) {
 # --- 4. Detect and Reverse Mirrored Plots (Trait-by-Trait Vector Method) ---
 fix_mirrored_traits_8x1 <- function(long_data) {
   
-  # SAFETY 1: Verify the experiment is actually an 8x1 design
+  # Initialize an empty dataframe to catch our flags
+  mirror_flags <- tibble(Plot = character(), Tree = numeric(), Trait = character(), Mirror_Flag = character())
+  
   exp_max_tree <- max(suppressWarnings(as.numeric(long_data$Tree)), na.rm = TRUE)
   if (exp_max_tree != 8) {
     message(paste("  -> Skipping mirror fix: Experiment max tree is", exp_max_tree, "(Not an 8x1 design)."))
-    return(long_data)
-  }
-  
-  # SAFETY 2: Ensure Validation_record column exists
-  if (!"Validation_record" %in% names(long_data)) {
-    long_data <- long_data %>% mutate(Validation_record = NA_character_)
+    return(list(data = long_data, flags = mirror_flags)) # Return list
   }
   
   valid_plots <- long_data %>%
@@ -490,7 +488,7 @@ fix_mirrored_traits_8x1 <- function(long_data) {
     filter(!is.na(Tree_Num), Tree_Num <= 8) %>%
     pull(Plot) %>% unique()
   
-  if(length(valid_plots) == 0) return(long_data)
+  if(length(valid_plots) == 0) return(list(data = long_data, flags = mirror_flags))
   
   fixed_data <- long_data
   plots_fixed_count <- 0
@@ -508,8 +506,6 @@ fix_mirrored_traits_8x1 <- function(long_data) {
     if(length(plot_ages) < 2) next
     
     plot_fixed_any <- FALSE
-    
-    # BASELINE: All trees with ANY measurement at the earliest age are "Alive"
     baseline_alive <- plot_data %>% filter(Age_Num == plot_ages[1]) %>% pull(Tree_Num) %>% unique()
     
     for (i in 2:length(plot_ages)) {
@@ -520,8 +516,6 @@ fix_mirrored_traits_8x1 <- function(long_data) {
       
       for (trt in traits_at_age) {
         measured_trees_raw <- plot_data %>% filter(Trait == trt) %>% pull(Tree_Num) %>% unique()
-        
-        # Check for Resurrections against our master baseline
         res_raw <- sum(!measured_trees_raw %in% baseline_alive)
         
         if (res_raw > 0) {
@@ -531,16 +525,18 @@ fix_mirrored_traits_8x1 <- function(long_data) {
           if (res_flip == 0) {
             message(paste("    -> ✅ Successfully flipped Plot", p, "for Trait:", trt))
             
-            # Apply permanent fix AND append to Validation_record
+            # Record the flag for the newly flipped Tree IDs
+            new_flags <- tibble(
+              Plot = p,
+              Tree = measured_trees_flip,
+              Trait = trt,
+              Mirror_Flag = paste("Mirrored Tree ID corrected for", trt)
+            )
+            mirror_flags <- bind_rows(mirror_flags, new_flags)
+            
+            # Apply permanent fix to the data
             fixed_data <- fixed_data %>%
-              mutate(
-                Validation_record = if_else(Plot == p & Trait == trt,
-                                            if_else(is.na(Validation_record) | Validation_record == "",
-                                                    "Mirrored Tree ID corrected (8x1)",
-                                                    paste0(Validation_record, " | Mirrored Tree ID corrected (8x1)")),
-                                            Validation_record),
-                Tree = if_else(Plot == p & Trait == trt, 9 - Tree, Tree)
-              )
+              mutate(Tree = if_else(Plot == p & Trait == trt, 9 - Tree, Tree))
             
             trees_measured_this_age <- c(trees_measured_this_age, measured_trees_flip)
             plot_fixed_any <- TRUE
@@ -551,11 +547,8 @@ fix_mirrored_traits_8x1 <- function(long_data) {
           trees_measured_this_age <- c(trees_measured_this_age, measured_trees_raw)
         }
       }
-      
-      # UPDATE BASELINE for the next age
       baseline_alive <- intersect(baseline_alive, unique(trees_measured_this_age))
     }
-    
     if(plot_fixed_any) plots_fixed_count <- plots_fixed_count + 1
   }
   
@@ -563,13 +556,13 @@ fix_mirrored_traits_8x1 <- function(long_data) {
     message(paste("\n  -> Trait Reversal complete. Fixed instances in", plots_fixed_count, "problem plots."))
   }
   
-  return(fixed_data)
+  # Return both the cleaned data AND the flags
+  return(list(data = fixed_data, flags = mirror_flags))
 }
 
-
-# ============================================================================
+# # # # # # # # # # # # # # # # # # # # # # # 
 # PART 1: LOAD TRANSLATION MAP & FOLDERS ####
-# ============================================================================
+# # # # # # # # # # # # # # # # # # # # # # # 
 
 trait_path <- file.path(data_dir,"PPGTraits_UK.xlsm")
 
@@ -604,9 +597,9 @@ message(paste("Found", length(experiments_to_process), "folders to check."))
 # or do single 
 experiments_to_process <-c("Craigellachie 49")
 
-# ============================================================================
-# PART 2: MAIN PROCESSING LOOP ####
-# ============================================================================
+# # # # # # # # # # # # # # # # # #
+# PART 2: MAIN PROCESSING LOOP #########################
+# # # # # # # # # # # # # # # # # # 
 
 root_path<-file.path(data_dir,"High GCA Fullsib P85-P87 experiments")
 
@@ -624,9 +617,9 @@ for (curr_exp in experiments_to_process) {
     spatial_info <- NULL
     exp_data_long <- NULL
     
-    # ------------------------------------------------------------------------
-    # STEP 1: LOAD RAW FILES & DESIGN
-    # ------------------------------------------------------------------------
+    # 
+    # STEP 1: LOAD RAW FILES & DESIGN ####
+    # 
     meas_filename <- paste0(file_prefix, "_ASCII.xlsx")
     meas_path <- file.path(exp_path, meas_filename)
     
@@ -635,7 +628,7 @@ for (curr_exp in experiments_to_process) {
       next 
     }
     
-    # --- Load Design ---
+    # --- Load Design ####
     # Look for either a .txt or .xlsx design file
     design_files <- dir_ls(exp_path, regexp = "(?i)_DF\\.(txt|xlsx)$")
     
@@ -688,7 +681,7 @@ for (curr_exp in experiments_to_process) {
       message("  -> NO DESIGN FILE FOUND. Proceeding without genetic info.")
     }
     
-    # --- Load Spatial Matrix ---
+    # --- Load Spatial Matrix ####
     matrix_files <- dir_ls(exp_path, regexp = "(?i)_Matrix\\.csv$")
     if (length(matrix_files) > 0) {
       # Safely read the matrix as characters to prevent "Filler" from turning into NA
@@ -731,9 +724,9 @@ for (curr_exp in experiments_to_process) {
       }
     }
     
-    # ------------------------------------------------------------------------
-    # STEP 2: MEASUREMENTS & RENAMING
-    # ------------------------------------------------------------------------
+    # 
+    # STEP 2: MEASUREMENTS & RENAMING ####
+    # 
     raw_data <- read_excel(meas_path, col_types = "text")
     
     if(!is.null(genetic_info)) {
@@ -746,7 +739,7 @@ for (curr_exp in experiments_to_process) {
         select(-Plot_Check)
     }
     
-    # --- NEW: Check for and resolve repeat measurements within the same age ---
+    # Check for and resolve repeat measurements within the same age ####
     # Safely ensure a Remarks column exists so we can query it without error
     if (!"Remarks" %in% names(raw_data)) {
       raw_data <- raw_data %>% mutate(Remarks = NA_character_)
@@ -760,10 +753,26 @@ for (curr_exp in experiments_to_process) {
     
     # If any duplicates exist, warn the user and filter them
     if (any(duplicate_check$Measure_Count > 1)) {
-      # Count unique tree/trait combinations that have duplicates
-      num_dupes <- duplicate_check %>% filter(Measure_Count > 1) %>% distinct(Plot, InferredTreePosition, Assessment) %>% nrow()
-      message(paste("    -> WARNING:", num_dupes, "trees have repeat measurements in a single year! Prioritizing 'Direction SE'..."))
       
+      # Isolate the duplicated records
+      dupes_only <- duplicate_check %>% filter(Measure_Count > 1)
+      
+      # Count unique tree/trait combinations that have duplicates
+      num_dupes <- dupes_only %>% distinct(Plot, InferredTreePosition, Assessment, `Assessment Year`) %>% nrow()
+      
+      # Extract and format the specific traits affected
+      affected_traits <- dupes_only %>% 
+        mutate(Combined_Trait = paste0(str_to_upper(Assessment), "_", `Assessment Year`)) %>% 
+        pull(Combined_Trait) %>% 
+        unique() %>% 
+        sort()
+      
+      # Print the rich diagnostic messages
+      message(paste("    -> WARNING:", num_dupes, "instances of repeat measurements detected!"))
+      message(paste("    -> Affected Traits:", paste(affected_traits, collapse = ", ")))
+      message("    -> Prioritizing 'Direction SE' (or keeping the first entry if exact match)...")
+      
+      # Apply the deduplication
       raw_data <- duplicate_check %>%
         group_by(Plot, InferredTreePosition, Assessment, `Assessment Year`) %>%
         arrange(
@@ -779,7 +788,7 @@ for (curr_exp in experiments_to_process) {
     }
     # 
     
-    # --- Create base long format and apply spatial correction ---
+    # --- Create base long format and apply spatial correction ####
     exp_data_long <- raw_data %>%
       select(Plot_Orig = Plot, Tree_Orig = InferredTreePosition, Value_Char = Measurement, TraitCode = Assessment, 
              UnitCode = Unit, Age = `Assessment Year`) %>%
@@ -811,7 +820,7 @@ for (curr_exp in experiments_to_process) {
       # Clean up the temporary columns
       select(-Tree_Orig_Num, -Max_Trees_Planted, -Trees_in_Subset)
     
-    # --- RENAMING LOGIC ---
+    # --- RENAMING LOGIC ####
     unique_prefixes <- exp_data_long %>% distinct(Prefix)
     unique_prefixes$trait_code_DP <- map_chr(unique_prefixes$Prefix, function(p) {
       if(is.na(p) || p == "") return(NA_character_)
@@ -830,7 +839,7 @@ for (curr_exp in experiments_to_process) {
       ) %>%
       select(Plot, Tree, Trait, Value_Char, Value_Num, UnitCode, Trait_Orig, Age, Prefix, Date) 
     
-    # --- STEP 2.4: GENERALIZED ADDITIONAL DATA (AD FILES) ---
+    # --- STEP 2.4: GENERALIZED ADDITIONAL DATA (AD FILES) ####
     # Looks for any file matching *_AD_*.csv or *_AD_*.xlsx
     ad_files <- dir_ls(exp_path, regexp = "(?i)_AD_(\\d+)\\.(csv|xlsx)$")
     
@@ -915,10 +924,16 @@ for (curr_exp in experiments_to_process) {
       }
     }
     
-    # --- NEW: Fix Mirrored 8x1 Plots before Survival Calculation ---
-    exp_data_long <- fix_mirrored_traits_8x1(exp_data_long)
+    # Standardize trait cases and Fix Mirrored Traits ####
+    exp_data_long <- exp_data_long %>% mutate(Trait = str_to_upper(Trait))
     
-    # --- STEP 2.5: SURVIVAL CALC (UPDATED FOR TREES) ---
+    mirror_output <- fix_mirrored_traits_8x1(exp_data_long)
+    exp_data_long <- mirror_output$data
+    exp_mirror_flags <- mirror_output$flags # Save the flags for later!
+    # 
+    
+    
+    # --- STEP 2.5: SURVIVAL CALC ####
     if(!is.null(spatial_info)) {
       raw_ages <- unique(na.omit(exp_data_long$Age))
       unique_ages <- raw_ages[!raw_ages %in% c("1", "01")]
@@ -964,9 +979,9 @@ for (curr_exp in experiments_to_process) {
       if(length(sur_list) > 0) exp_data_long <- bind_rows(exp_data_long, bind_rows(sur_list))
     }
     
-    # ----------------------------------------------------------------------------
-    # STEP 3: FLAGS & LOGIC (UPDATED WITH SHRINKAGE)
-    # ----------------------------------------------------------------------------
+    #
+    # STEP 3: FLAGS & LOGIC ####
+    # 
     exp_data_long <- exp_data_long %>%
       mutate(
         Is_Target_For_Zero_Removal = str_detect(Trait, "(?i)^(Pil|Br|St)"),
@@ -1014,7 +1029,7 @@ for (curr_exp in experiments_to_process) {
       mutate(Expected_Prev_Age = lag(Age_Num)) %>%
       ungroup()
     
-    # [UPDATED] Calculate Shrinkage Flags using the global sequence AND unit checks
+    # Calculate Shrinkage Flags using the global sequence AND unit checks
     shrinkage_flags <- data_with_outliers %>%
       filter(!is.na(Value_Num), str_detect(Trait, "_\\d+$")) %>%
       filter(!Is_Ordinal, !Is_Binary_Resi) %>%
@@ -1054,9 +1069,9 @@ for (curr_exp in experiments_to_process) {
         )
       )
     
-    # ----------------------------------------------------------------------------
-    # STEP 4: OUTPUT GENERATION (TREE LEVEL)
-    # ----------------------------------------------------------------------------
+    # 
+    # STEP 4: OUTPUT GENERATION (TREE LEVEL) ####
+    # 
     final_long_dedup <- final_long_data %>%
       arrange(Plot, Tree, Trait, desc(Date)) %>%
       distinct(Plot, Tree, Trait, .keep_all = TRUE)
@@ -1155,7 +1170,34 @@ for (curr_exp in experiments_to_process) {
       select(all_of(c("Plot", "Tree", existing_meta_cols, remaining_cols))) %>%
       arrange(Plot, Tree)
     
+    # 
+    # ---  MERGE: Add Mirror Flags to Validation Record --- ####
+    # 
+    # 1. Summarize the flags to one row per Plot/Tree FIRST
+    exp_mirror_summary <- exp_mirror_flags %>% 
+      mutate(Plot = as.character(Plot), Tree = as.numeric(Tree)) %>%
+      group_by(Plot, Tree) %>%
+      summarise(
+        Combined_Mirror_Flags = paste(na.omit(unique(Mirror_Flag)), collapse = " | "), 
+        .groups = "drop"
+      )
+    
+    # 2. Join the summary to your wide dataset safely (1-to-1 match)
+    final_wide_with_flags <- final_wide_with_flags %>%
+      left_join(exp_mirror_summary, by = c("Plot", "Tree")) %>%
+      mutate(
+        Validation_record = case_when(
+          !is.na(Combined_Mirror_Flags) & (is.na(Validation_record) | Validation_record == "") ~ Combined_Mirror_Flags,
+          !is.na(Combined_Mirror_Flags) ~ paste(Validation_record, "|", Combined_Mirror_Flags),
+          TRUE ~ Validation_record
+        )
+      ) %>%
+      # Clean up the temporary column
+      select(-Combined_Mirror_Flags)
+    # ---- ##
+    
     write_csv(final_wide_with_flags, file.path(exp_path, paste0(file_prefix, "_Full_Data_With_Flags.csv")), na = "")
+    
     # PDF & Stats
     current_traits <- unique(final_long_dedup$Trait)
     prefixes_found <- unique(final_long_dedup$Prefix)
@@ -1176,9 +1218,8 @@ for (curr_exp in experiments_to_process) {
       mutate(across(where(is.numeric), ~ round(., 2)))
     
     write_csv(stats_df, file.path(exp_path, paste0(curr_exp, "_Stats.csv")), na = "")
-    
     #
-    # STEP 6: XML GENERATION
+    # STEP 5: XML GENERATION ####
     #
     xml_data <- data_with_outliers %>%
       group_by(Trait) %>%
