@@ -470,6 +470,103 @@ map_interior_trees <- function(tree_idx, subset_size, full_size) {
   return(mapped_idx)
 }
 
+# --- 4. Detect and Reverse Mirrored Plots (Trait-by-Trait Vector Method) ---
+fix_mirrored_traits_8x1 <- function(long_data) {
+  
+  # SAFETY 1: Verify the experiment is actually an 8x1 design
+  exp_max_tree <- max(suppressWarnings(as.numeric(long_data$Tree)), na.rm = TRUE)
+  if (exp_max_tree != 8) {
+    message(paste("  -> Skipping mirror fix: Experiment max tree is", exp_max_tree, "(Not an 8x1 design)."))
+    return(long_data)
+  }
+  
+  # SAFETY 2: Ensure Validation_record column exists
+  if (!"Validation_record" %in% names(long_data)) {
+    long_data <- long_data %>% mutate(Validation_record = NA_character_)
+  }
+  
+  valid_plots <- long_data %>%
+    mutate(Tree_Num = suppressWarnings(as.numeric(Tree))) %>%
+    filter(!is.na(Tree_Num), Tree_Num <= 8) %>%
+    pull(Plot) %>% unique()
+  
+  if(length(valid_plots) == 0) return(long_data)
+  
+  fixed_data <- long_data
+  plots_fixed_count <- 0
+  
+  for (p in valid_plots) {
+    plot_data <- long_data %>% 
+      filter(Plot == p, !is.na(Value_Num), !str_detect(Trait, "(?i)Sur_")) %>%
+      mutate(
+        Age_Num = suppressWarnings(as.numeric(str_extract(Trait, "\\d+$"))),
+        Tree_Num = suppressWarnings(as.numeric(Tree))
+      ) %>%
+      filter(!is.na(Age_Num), !is.na(Tree_Num))
+    
+    plot_ages <- sort(unique(plot_data$Age_Num))
+    if(length(plot_ages) < 2) next
+    
+    plot_fixed_any <- FALSE
+    
+    # BASELINE: All trees with ANY measurement at the earliest age are "Alive"
+    baseline_alive <- plot_data %>% filter(Age_Num == plot_ages[1]) %>% pull(Tree_Num) %>% unique()
+    
+    for (i in 2:length(plot_ages)) {
+      target_age <- plot_ages[i]
+      traits_at_age <- plot_data %>% filter(Age_Num == target_age) %>% pull(Trait) %>% unique()
+      
+      trees_measured_this_age <- c()
+      
+      for (trt in traits_at_age) {
+        measured_trees_raw <- plot_data %>% filter(Trait == trt) %>% pull(Tree_Num) %>% unique()
+        
+        # Check for Resurrections against our master baseline
+        res_raw <- sum(!measured_trees_raw %in% baseline_alive)
+        
+        if (res_raw > 0) {
+          measured_trees_flip <- 9 - measured_trees_raw
+          res_flip <- sum(!measured_trees_flip %in% baseline_alive)
+          
+          if (res_flip == 0) {
+            message(paste("    -> ✅ Successfully flipped Plot", p, "for Trait:", trt))
+            
+            # Apply permanent fix AND append to Validation_record
+            fixed_data <- fixed_data %>%
+              mutate(
+                Validation_record = if_else(Plot == p & Trait == trt,
+                                            if_else(is.na(Validation_record) | Validation_record == "",
+                                                    "Mirrored Tree ID corrected (8x1)",
+                                                    paste0(Validation_record, " | Mirrored Tree ID corrected (8x1)")),
+                                            Validation_record),
+                Tree = if_else(Plot == p & Trait == trt, 9 - Tree, Tree)
+              )
+            
+            trees_measured_this_age <- c(trees_measured_this_age, measured_trees_flip)
+            plot_fixed_any <- TRUE
+          } else {
+            trees_measured_this_age <- c(trees_measured_this_age, measured_trees_raw)
+          }
+        } else {
+          trees_measured_this_age <- c(trees_measured_this_age, measured_trees_raw)
+        }
+      }
+      
+      # UPDATE BASELINE for the next age
+      baseline_alive <- intersect(baseline_alive, unique(trees_measured_this_age))
+    }
+    
+    if(plot_fixed_any) plots_fixed_count <- plots_fixed_count + 1
+  }
+  
+  if (plots_fixed_count > 0) {
+    message(paste("\n  -> Trait Reversal complete. Fixed instances in", plots_fixed_count, "problem plots."))
+  }
+  
+  return(fixed_data)
+}
+
+
 # ============================================================================
 # PART 1: LOAD TRANSLATION MAP & FOLDERS ####
 # ============================================================================
@@ -505,7 +602,7 @@ experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", "
 message(paste("Found", length(experiments_to_process), "folders to check."))
 
 # or do single 
-experiments_to_process <-c("Brecon 15")
+experiments_to_process <-c("Craigellachie 49")
 
 # ============================================================================
 # PART 2: MAIN PROCESSING LOOP ####
@@ -817,6 +914,9 @@ for (curr_exp in experiments_to_process) {
         }
       }
     }
+    
+    # --- NEW: Fix Mirrored 8x1 Plots before Survival Calculation ---
+    exp_data_long <- fix_mirrored_traits_8x1(exp_data_long)
     
     # --- STEP 2.5: SURVIVAL CALC (UPDATED FOR TREES) ---
     if(!is.null(spatial_info)) {
