@@ -360,8 +360,8 @@ generate_pdf_report <- function(long_data, wide_data, exp_name, multi_age_prefix
   }
   
   # --- E. Correlations ---
-  if (length(cont_traits) >= 2) {
-    gen_pairs <- combn(cont_traits, 2, simplify = FALSE)
+  if (length(all_cont_traits) >= 2) {
+    gen_pairs <- combn(all_cont_traits, 2, simplify = FALSE)
     for (pair in gen_pairs) {
       t1 <- pair[1]; t2 <- pair[2]
       if(!all(c(t1, t2) %in% names(wide_data))) next
