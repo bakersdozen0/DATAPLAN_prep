@@ -544,6 +544,15 @@ build_pedigree <- function(target_dir, founders, controls, op_families) {
     mutate(Stage = 4, Dad_id = NA_character_) %>%
     select(Family_name, Mum_name, Mum_type, Dad_name, Dad_type, Fam_description, Stage, Dad_id)
   
+  # ### FIX 1: PROCESS CONTROLS AS FAMILIES ###
+  fam_controls <- controls %>%
+    mutate(
+      Mum_name = "Unknown", Mum_type = "G",
+      Dad_name = "Unknown", Dad_type = "G",
+      Stage = 1, Dad_id = NA_character_
+    ) %>%
+    select(Family_name, Mum_name, Mum_type, Dad_name, Dad_type, Fam_description, Stage, Dad_id)
+  
   # 5. PROCESS CP FAMILIES
   fam_cp <- trial_data %>%
     filter(str_detect(Family_name, "_"), !str_detect(Family_name, "(?i)iller")) %>%
@@ -565,11 +574,11 @@ build_pedigree <- function(target_dir, founders, controls, op_families) {
     select(Family_name, Mum_name, Mum_type, Dad_name, Dad_type, Fam_description, Stage, Dad_id) %>%
     distinct()
   
-  # 6. ASSEMBLE ALL FAMILIES
+  # 6. ASSEMBLE ALL FAMILIES (Notice fam_controls is now included!)
   fam_founders <- grp_locat %>% mutate(Family_name = paste0(Group_name, "_Founders"), Mum_name = Group_name, Mum_type = "G", Dad_name = Group_name, Dad_type = "G", Fam_description = paste("Dummy family for founders in", Group_name), Stage = 2, Dad_id = NA_character_) %>% select(names(fam_op))
   fam_fillers <- tibble(Trial_id = unique(trial_data$Trial_id)) %>% mutate(Family_name = paste0(Trial_id, "_Filler"), Mum_name = "Unknown", Mum_type = "G", Dad_name = "Unknown", Dad_type = "G", Fam_description = paste("Fillers for trial", Trial_id), Stage = 3, Dad_id = NA_character_) %>% select(names(fam_op))
   
-  families_combined <- bind_rows(fam_fillers, fam_founders, fam_op, fam_cp) %>% distinct(Family_name, .keep_all = TRUE) %>% arrange(Stage, Family_name) %>% mutate(Family_id = row_number())
+  families_combined <- bind_rows(fam_controls, fam_fillers, fam_founders, fam_op, fam_cp) %>% distinct(Family_name, .keep_all = TRUE) %>% arrange(Stage, Family_name) %>% mutate(Family_id = row_number())
   
   # 7. BUILD GENOTYPES 
   genotypes_final <- parent_meta %>%
@@ -616,11 +625,10 @@ db_fam_list   <- db_fams[[grep("(?i)family.*name", names(db_fams), value = TRUE)
 db_geno_list  <- db_genos[[grep("(?i)name", names(db_genos), value = TRUE)[1]]]
 db_group_list <- db_groups[[grep("(?i)name", names(db_groups), value = TRUE)[1]]]
 
-# --- 5. THE TRUE ANTI-JOIN (Now explicitly verifying Controls in Families) ---
+# --- 5. THE TRUE ANTI-JOIN ---
 cat("\n--- BUILDING TRUE UPLOAD FILES ---\n")
 
-# A. Families (Trials + Controls + Fillers)
-# This uses the database export to filter out ANY family already in the system
+# A. Families
 true_families_export <- c1_tables$families %>% 
   filter(!Family_name %in% db_fam_list)
 
@@ -639,15 +647,18 @@ true_genotypes_export <- c1_tables$genotypes %>%
   filter(!Genotype_name %in% db_geno_list) %>%
   distinct(Genotype_name, .keep_all = TRUE)
 
-# D. Build Verified Groups (Filtering for new Controls and new Selection Groups)
+# ### FIX 2: BUILD VERIFIED GROUPS (Catching the controls!) ###
+# The | Group_name %in% true_families_export$Family_name ensures standalone control 
+# populations are carried over into the Groups export!
 true_groups_export <- c1_tables$groups %>%
-  filter(Group_name %in% required_parents_G) %>%
+  filter(Group_name %in% required_parents_G | Group_name %in% true_families_export$Family_name) %>%
   filter(!Group_name %in% db_group_list) %>%
   distinct(Group_name, .keep_all = TRUE)
 
 cat("Verified Groups to upload:    ", nrow(true_groups_export), "\n")
 cat("Verified Genotypes to upload: ", nrow(true_genotypes_export), "\n")
 cat("Verified Families to upload:  ", nrow(true_families_export), "\n")
+
 # --- 6. ORPHAN CHECK ---
 cat("\n--- ORPHAN CHECK ---\n")
 orphans_I <- required_parents_I[!(required_parents_I %in% db_geno_list | required_parents_I %in% true_genotypes_export$Genotype_name)]
@@ -668,7 +679,6 @@ if(length(orphans_I) == 0 && length(orphans_G) == 0) {
 write_csv(true_groups_export, file.path(data_dir, "Pedigree", "Verified_Cycle1_Groups_Import.csv"))
 write_csv(true_genotypes_export, file.path(data_dir, "Pedigree", "Verified_Cycle1_Genotypes_Import.csv"))
 write_csv(true_families_export, file.path(data_dir, "Pedigree", "Verified_Cycle1_Families_Import.csv"))
-
 
 #### plot pedigree ####
 library(dplyr)
@@ -787,8 +797,8 @@ pedigree_graph_all <- graph_from_data_frame(d = pedigree_edges_all, vertices = a
 
 ggraph(pedigree_graph_all, layout = 'sugiyama') + 
   geom_edge_diagonal(arrow = arrow(length = unit(1.5, 'mm')), end_cap = circle(3, 'mm'), alpha = 0.3, color = "gray50") +
-  geom_node_point(aes(color = Node_Type), size = 3) +
-  geom_node_text(aes(label = name), vjust = 1.5, hjust = 0.5, size = 2.5, repel = TRUE) +
+  geom_node_point(aes(color = Node_Type), size = 2) +
+  geom_node_text(aes(label = name), vjust = 1.5, hjust = 0.5, size = 2, repel = TRUE) +
   theme_void() + theme(legend.position = "bottom") +
   scale_color_manual(
     values = c("1. Origin" = "#E41A1C", "2. Group" = "#377EB8", "3. Genotype (Parent)" = "#4DAF4A", "4. Family (Offspring)" = "#984EA3"),
