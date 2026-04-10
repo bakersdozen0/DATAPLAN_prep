@@ -217,6 +217,14 @@ generate_pdf_report <- function(long_data, wide_data, exp_name, multi_age_prefix
         younger <- cols[i]; older <- cols[i+1]
         if(!all(c(younger, older) %in% names(wide_data))) next
         
+        # --- NEW: Verify units match before plotting ---
+        unit_younger <- long_data %>% filter(Trait == younger) %>% drop_na(UnitCode) %>% pull(UnitCode) %>% head(1)
+        unit_older <- long_data %>% filter(Trait == older) %>% drop_na(UnitCode) %>% pull(UnitCode) %>% head(1)
+        
+        # If both have units but they don't match, skip generating this specific plot
+        if(length(unit_younger) > 0 && length(unit_older) > 0 && unit_younger != unit_older) next
+        # -----------------------------------------------
+        
         plot_df <- wide_data %>%
           select(Plot, Tree, X = all_of(older), Y = all_of(younger)) %>%
           filter(!is.na(X), !is.na(Y)) %>%
@@ -228,7 +236,7 @@ generate_pdf_report <- function(long_data, wide_data, exp_name, multi_age_prefix
           geom_abline(slope = 1, intercept = 0, color = "gray50", linetype = "dashed") +
           geom_point(aes(color = Status), size = 2, alpha = 0.6) +
           scale_color_manual(values = c("Normal"="black", "Shrinkage"="red")) +
-          labs(title = "Shrinkage Check", subtitle = paste(younger, ">", older), x = older, y = younger) +
+          labs(title = "Shrinkage Check", subtitle = paste(younger, "vs", older, "(Units Match)"), x = older, y = younger) +
           theme_minimal()
         print(p_shrink)
       }
@@ -497,7 +505,7 @@ experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", "
 message(paste("Found", length(experiments_to_process), "folders to check."))
 
 # or do single 
-experiments_to_process <-c("Spadeadam 7")
+experiments_to_process <-c("Speyside 7")
 
 # ============================================================================
 # PART 2: MAIN PROCESSING LOOP ####
@@ -511,7 +519,7 @@ for (curr_exp in experiments_to_process) {
     message(paste("\n=========================================="))
     message(paste("Processing Folder:", curr_exp))
     
-    exp_path <- file.path(data_dir,root_path, curr_exp)
+    exp_path <- file.path(root_path, curr_exp)
     file_prefix <- str_replace_all(curr_exp, " ", "_")
     
     # Initialize variables
@@ -859,29 +867,48 @@ for (curr_exp in experiments_to_process) {
       ) %>%
       ungroup()
     
-    # [NEW] Calculate Shrinkage Flags
+    # Map out the exact, adjacent age steps that occurred in the whole experiment
+    global_age_seq <- data_with_outliers %>%
+      filter(!is.na(Value_Num), str_detect(Trait, "_\\d+$")) %>%
+      mutate(
+        Base_Trait = str_remove(Trait, "_\\d+$"),
+        Age_Num = suppressWarnings(as.numeric(str_extract(Trait, "\\d+$")))
+      ) %>%
+      filter(!is.na(Age_Num)) %>%
+      distinct(Base_Trait, Age_Num) %>%
+      arrange(Base_Trait, Age_Num) %>%
+      group_by(Base_Trait) %>%
+      mutate(Expected_Prev_Age = lag(Age_Num)) %>%
+      ungroup()
+    
+    # [UPDATED] Calculate Shrinkage Flags using the global sequence AND unit checks
     shrinkage_flags <- data_with_outliers %>%
       filter(!is.na(Value_Num), str_detect(Trait, "_\\d+$")) %>%
-      # 1. NEW: Completely ignore ordinal and binary traits
       filter(!Is_Ordinal, !Is_Binary_Resi) %>%
-      # 2. NEW: Explicitly added Br and St to the regex exclusion list
       filter(!str_detect(Trait, "(?i)(Sur|Resi|Detrended|Ampli|Resistance|Resist|Crack|Form|Br|St|Pil)")) %>%
       mutate(
         Base_Trait = str_remove(Trait, "_\\d+$"),
         Age_Num = suppressWarnings(as.numeric(str_extract(Trait, "\\d+$")))
       ) %>%
       filter(!is.na(Age_Num)) %>%
+      left_join(global_age_seq, by = c("Base_Trait", "Age_Num")) %>%
       arrange(Plot, Tree, Base_Trait, Age_Num) %>%
       group_by(Plot, Tree, Base_Trait) %>%
       mutate(
         Prev_Val = lag(Value_Num),
         Prev_Age = lag(Age_Num),
-        Is_Shrinkage = !is.na(Prev_Val) & (Value_Num < Prev_Val)
+        Prev_Unit = lag(UnitCode), # <--- NEW: Grab the unit from the previous measurement
+        
+        # Strict check: adjacent ages AND matching units
+        Is_Shrinkage = !is.na(Prev_Val) & !is.na(Expected_Prev_Age) & 
+          (Prev_Age == Expected_Prev_Age) & 
+          (UnitCode == Prev_Unit) &  # <--- NEW: Ensure units are identical
+          (Value_Num < Prev_Val)
       ) %>%
       ungroup() %>%
       filter(Is_Shrinkage) %>%
       select(Plot, Tree, Trait, Prev_Age) %>%
-      mutate(Shrinkage_Error = paste("Shrinkage detected (smaller than Age", Prev_Age, ")"))
+      mutate(Shrinkage_Error = paste("Shrinkage detected (smaller than Age", Prev_Age, "with matching units)"))
     
     final_long_data <- data_with_outliers %>%
       left_join(shrinkage_flags %>% select(-Prev_Age), by = c("Plot", "Tree", "Trait")) %>%
@@ -952,7 +979,6 @@ for (curr_exp in experiments_to_process) {
     }
     
     # Genetic info is Plot-level only
-    # Genetic info is Plot-level only
     if (!is.null(genetic_info)) final_wide_with_flags <- left_join(final_wide_with_flags, genetic_info, by = "Plot")
     if (!is.null(spatial_info)) final_wide_with_flags <- left_join(final_wide_with_flags, spatial_info, by = c("Plot", "Tree"))
     
@@ -1014,7 +1040,7 @@ for (curr_exp in experiments_to_process) {
       summarise(N_Valid = sum(!is.na(Value_Num)), Mean = mean(Value_Num, na.rm=TRUE), 
                 Std_Dev = sd(Value_Num, na.rm=TRUE), Min = min(Value_Num, na.rm=TRUE), Max = max(Value_Num, na.rm=TRUE),
                 CV_Pct = (sd(Value_Num, na.rm=TRUE)/mean(Value_Num, na.rm=TRUE))*100) %>%
-      mutate(across(wfile.path(data_dir,is.numeric), ~ round(., 2)))
+      mutate(across(where(is.numeric), ~ round(., 2)))
     
     write_csv(stats_df, file.path(exp_path, paste0(curr_exp, "_Stats.csv")), na = "")
     
