@@ -620,12 +620,23 @@ for (curr_exp in experiments_to_process) {
     # 
     # STEP 1: LOAD RAW FILES & DESIGN ####
     # 
-    meas_filename <- paste0(file_prefix, "_ASCII.xlsx")
-    meas_path <- file.path(exp_path, meas_filename)
+    # NEW: Dynamically hunt for either .csv or .xlsx
+    ascii_files <- fs::dir_ls(exp_path, regexp = paste0("(?i)", file_prefix, ".*_ASCII\\.(csv|xlsx)$"))
     
-    if (!file.exists(meas_path)) {
-      message(paste("  -> SKIPPING: Measurement file not found:", meas_filename))
+    if (length(ascii_files) == 0) {
+      message(paste("  -> SKIPPING: Measurement file not found for:", curr_exp))
       next 
+    }
+    
+    # Check if multiple files exist and warn the user
+    if (length(ascii_files) > 1) {
+      message("  -> WARNING: Multiple ASCII measurement files found in folder!")
+      message(paste("  -> Found:", paste(basename(ascii_files), collapse = " AND ")))
+      meas_path <- ascii_files[1]
+      message(paste("  -> ACTION: Decided to load ->", basename(meas_path)))
+    } else {
+      meas_path <- ascii_files[1] 
+      message(paste("  -> Loading Measurement File:", basename(meas_path)))
     }
     
     # --- Load Design ####
@@ -727,7 +738,11 @@ for (curr_exp in experiments_to_process) {
     # 
     # STEP 2: MEASUREMENTS & RENAMING ####
     # 
-    raw_data <- read_excel(meas_path, col_types = "text")
+    if (str_detect(meas_path, "(?i)\\.csv$")) {
+      raw_data <- read_csv(meas_path, show_col_types = FALSE) %>% clean_names()
+    } else {
+      raw_data <- read_excel(meas_path) %>% clean_names()
+    }
     
     if(!is.null(genetic_info)) {
       # Ensure genetic_info Plot is character so it joins safely
