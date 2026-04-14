@@ -15,14 +15,15 @@ Example: `z_drive <- "Z:/Shares/CSFCC/.../psi_DATAPLAN_prep"`
 
 ### 1. Data Processing & Validation
 * **`DP_batch_process.R` & `DP_batch_process Multi Tree plots.R`**: The core engines for trial data. These scripts loop through trial folders, parse ASCII measurements and design files, and apply standard naming conventions based on `PPGTraits_UK.xlsm`. They flag statistical outliers, identify tree shrinkage over time, calculate survival, and generate final `.csv` datasets alongside visual PDF reports (histograms, spatial maps, shrinkage plots). They also generate the Dataplan XML import files.
-* **`read_BrSt_sheets.R`**: A specialized parser for extracting Branch and Straightness (Br/St) assessment data from highly formatted Kintyre Excel layout sheets into tidy formats.
-* **`Format_matrix_from_formula_to_csv.R`**: A utility script to strip formulas from spatial matrix Excel files and save them as clean, machine-readable CSVs.
+* **`read_BrSt_sheets.R`**: A parser for extracting Branch and Straightness (Br/St) assessment data from  unformatted Kintyre field layout sheets into tidy formats.
 
-### 2. Pedigree & Database Generation
-* **`other_functions.R`**: A comprehensive suite of tools for database management. Includes functions to:
+### 2. Pedigree Generation
+* **`Pedigree.R`**: Script for pulling family names from Wide format data and generating pedigre import files (`Groups`, `Genotypes`, `Families`) by cross-referencing field trial data against the founder database, and comparing these data to the pedigree data existing in DP.
+
+### 2. Other helpful code I've held onto
+* **`other_functions.R`** . Includes functions to:
   * Count unique and shared parents/families across different breeding cycles (e.g., P80 vs P90 experiments).
   * Isolate Open-Pollinated (OP) families from trial and design data.
-  * Build complex, verified pedigree import files (`Groups`, `Genotypes`, `Families`) by cross-referencing field trial data against the founder database.
   * Perform diagnostic checks (like mapping origin locations and generating network plots of the pedigree).
 
 ## Quality Control (QC) Logic Applied
