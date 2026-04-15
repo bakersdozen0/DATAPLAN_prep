@@ -51,6 +51,7 @@ At the very top of `DP_batch_process_Master.R`, you must set three global variab
 
 ### 📁 Expected Trial Folder Structure
 The script dynamically crawls the `TRIAL_SERIES` folder. For each trial (e.g., `Kintyre_17`), it looks for the following files:
+**NB:** This script will still run without throwing errors even if it only has the ASCII file! It will warn you if a DF or Matrix is missing, however. 
 
 1. **`*_ASCII.csv`** or **`*_ASCII.xlsx`** *(Required)*: The raw Dataplan measurement export.
 2. **`*_DF.txt`**, **`*_DF.`** or **`*_DF.xlsx`** *(Optional)*: The design file containing Crosses, Plot, and Block logic.
