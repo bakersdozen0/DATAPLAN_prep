@@ -25,12 +25,14 @@ This repository has been refactored into a **single unified pipeline** that auto
 ## 2. Pedigree Generation
 * **`Pedigree.R`**: Script for pulling family names from Wide format data and generating pedigre import files (`Groups`, `Genotypes`, `Families`) by cross-referencing field trial data against the founder database, and comparing these data to the pedigree data existing in DP.
 
-## 3. Other helpful code I've held onto
+## 3. Other Helpful Functions
 * **`other_functions.R`** . Includes functions to:
   * Count unique and shared parents/families across different breeding cycles (e.g., P80 vs P90 experiments).
   * Isolate Open-Pollinated (OP) families from trial and design data.
   * Perform diagnostic checks (like mapping origin locations and generating network plots of the pedigree).
 
+## 4. Reading field data sheets: 
+* **`read_BrSt_sheets.R`**: A parser for extracting Branch and Straightness (Br/St) assessment data from  unformatted Kintyre field layout sheets into tidy formats.
 
 # ⚙️ Configuration
 At the very top of `DP_batch_process_Master.R`, you must set three global variables before running a batch:
