@@ -7,7 +7,7 @@ It takes raw ASCII exports, merges them with design files and spatial matrices, 
 ## 🚀 The Master Script (`DP_batch_process_Master.R`)
 This repository has been refactored into a **single unified pipeline** that automatically handles:
 * **Any Species:** The script dynamically reads the `species` or `species_code` column from the raw ASCII file to build the correct genetic family names and control prefixes (e.g., `ss_` vs `sp_`).
-* **Any File Format:** Seamlessly accepts both `.csv` and `.xlsx` inputs for raw data and design files.
+* **Any File Format:** Seamlessly accepts both `.csv` and `.xlsx` inputs for raw data, and either `.txt` or general format `.`design files.
 * **Single-Tree & Multi-Tree Plots:** Governed by a simple toggle at the top of the script.
 
 ### ⚙️ Configuration
@@ -23,13 +23,13 @@ At the very top of `DP_batch_process_Master.R`, you must set three global variab
 ## 📂 Repository Requirements
 
 * **`DP_batch_process_Master.R`**: The main execution script.
-* **`Trait_trans.csv`**: The master trait translation map. **This file must remain in the same directory as the R Project.** It maps raw Dataplan headers (e.g., `HGT`) to standardized output variables and contains XML formatting rules.
+* **`Trait_trans.csv`**: The master trait translation map. **This file must remain in the same directory as the R Project.** It maps raw Dataplan headers (e.g., `HEIGHT`) to standardized output variables and contains XML formatting rules.
 
 ## 📁 Expected Trial Folder Structure
 The script dynamically crawls the `TRIAL_SERIES` folder. For each trial (e.g., `Kintyre_17`), it looks for the following files:
 
 1. **`*_ASCII.csv`** or **`*_ASCII.xlsx`** *(Required)*: The raw Dataplan measurement export.
-2. **`*_DF.txt`** or **`*_DF.xlsx`** *(Optional)*: The design file containing Crosses, Plot, and Block logic.
+2. **`*_DF.txt`**, **`*_DF.`** or **`*_DF.xlsx`** *(Optional)*: The design file containing Crosses, Plot, and Block logic.
 3. **`*_Matrix.csv`** *(Optional)*: The spatial layout mapping Plot IDs to physical Rows/Positions.
 4. **`*_AD_<age>.csv/xlsx`** *(Optional)*: Additional Data files (e.g., Resi data) to be merged. The age must be in the filename (e.g., `Ardross_AD_10.xlsx`).
 
@@ -44,5 +44,5 @@ For each processed trial folder, the script generates:
 ## 🛑 Validation Flags (`Reject_Flag = 1`)
 Data points are flagged for rejection under the following conditions:
 * **Extreme Outliers:** Values exceeding Mean ± 4 Standard Deviations (for continuous traits).
-* **Invalid Ordinal Scores:** Visual scores (e.g., 0) that fall outside expected 1-9 ordinal scales. 
+* **Invalid Ordinal Scores:** Visual scores (e.g., 0) that fall outside expected 1-6 ordinal scales. 
 * **Temporal Shrinkage:** A physical measurement (e.g., Height, DBH) that is strictly smaller than the measurement at the previous age (requires matching units).
