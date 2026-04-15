@@ -47,7 +47,7 @@ At the very top of `DP_batch_process_Master.R`, you must set three global variab
 ### 📂 Repository Requirements
 
 * **`DP_batch_process_Master.R`**: The main execution script.
-* **`Trait_trans.csv`**: The master trait translation map. **This file must remain in the same directory as the R Project.** It maps raw Dataplan headers (e.g., `HEIGHT`) to standardized output variables and contains XML formatting rules.
+* **`Trait_trans.csv`**: The master trait translation map. **This file must remain in the same directory as the R Project.** It maps raw CEDD headers (e.g., `HEIGHT`) to standardized output variables and contains XML formatting rules.
 
 ### 📁 Expected Trial Folder Structure
 The script dynamically crawls the `TRIAL_SERIES` folder. For each trial (e.g., `Kintyre_17`), it looks for the following files:
