@@ -1,9 +1,14 @@
 #### #### #### ####
 #### #### #### ####
- 
-data_dir<-"//forestresearch.gov.uk/shares/CSFCC/Forest Resource and Product Assessment and Improvement/NRS-Tree Improvement/CONIFERS/SITKA SPRUCE/psi_DATAPLAN_prep"
 
+data_dir<-"C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Scots_Pine"
 
+# SS On Z: 
+# "//forestresearch.gov.uk/shares/CSFCC/Forest Resource and Product Assessment and Improvement/NRS-Tree Improvement/CONIFERS/SITKA SPRUCE/psi_DATAPLAN_prep"
+# SS on Teams: 
+# "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka"
+# SP on Teams:
+#"C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Scots_Pine"
 
 library(usethis)
 library(tidyverse)
@@ -12,6 +17,7 @@ library(fs)
 library(gridExtra)
 library(grid)
 library(here)
+library(janitor)
 
 # # # # # # # # # # # # # # # # # # # # # # # 
 # PART 0: HELPER FUNCTIONS #### 
@@ -31,25 +37,24 @@ parse_long_design_file <- function(filepath, exp_prefix) {
   trt_lines <- trt_lines[grep("=", trt_lines)]
   
   trt_df <- tibble(line = trt_lines) %>%
-    # Flag if the line starts with an asterisk (indicating a control) before we chop it up
     mutate(Is_Control = str_detect(str_trim(line), "^\\*")) %>%
     extract(line, into = c("Design_ID", "Cross_Name"), 
             regex = "^\\s*\\*?\\s*(\\d+)=(.*)$", convert = TRUE) %>%
     mutate(Cross_Name = str_trim(Cross_Name)) %>%
-    # Cleanly separate the Mother and Father into their own columns for standard crosses
+    # NEW: Changed SS to SP to match Scots Pine crosses
     extract(
       Cross_Name, 
       into = c("Maternal_ID", "Paternal_ID"), 
-      regex = "^SS\\s*(\\d+)\\s*SS\\s*(.*)$", 
+      regex = "^SP\\s*(\\d+)\\s*SP\\s*(.*)$", 
       remove = FALSE
     ) %>%
     mutate(
       Maternal_ID = str_trim(Maternal_ID),
       Paternal_ID = str_trim(Paternal_ID),
-      # Extract the name for the controls by stripping the starting "SS "
+      # NEW: Changed SS to SP for stripping control names
       Control_Name = if_else(
         Is_Control,
-        str_trim(str_replace(Cross_Name, "^SS\\s*", "")),
+        str_trim(str_replace(Cross_Name, "^SP\\s*", "")),
         NA_character_
       )
     )
@@ -58,7 +63,6 @@ parse_long_design_file <- function(filepath, exp_prefix) {
   plot_lines <- raw_lines[(plot_start + 1):length(raw_lines)]
   plot_lines <- plot_lines[grep(":", plot_lines)]
   
-  # NEW: Regex captures Plot, Design_ID, SubBlock, AND Block
   plot_df <- tibble(line = plot_lines) %>%
     extract(line, into = c("Plot", "Design_ID", "SubBlock", "Block"), 
             regex = "^\\s*(\\d+):\\s*(\\d+)\\s+(\\d+)\\s+(\\d+)", convert = TRUE)
@@ -73,18 +77,15 @@ parse_long_design_file <- function(filepath, exp_prefix) {
       Family_name = case_when(
         Design_ID == 0 ~ paste0(exp_prefix, "_Filler"),
         
-        # Map controls exactly like the XLSX function
-        !is.na(Control_Name) ~ paste0("ss", Control_Name),
+        # NEW: Changed 'ss' to 'sp' across all the naming conventions
+        !is.na(Control_Name) ~ paste0("sp", Control_Name),
+        !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0("sp", Maternal_ID, "_OPCB"),
+        !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0("sp", Maternal_ID, "_sp", Paternal_ID),
         
-        # Check the extracted Paternal_ID for OP, and build with Maternal_ID
-        !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0("ss", Maternal_ID, "_OPCB"),
-        !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0("ss", Maternal_ID, "_ss", Paternal_ID),
-        
-        # Fallback just in case formatting is totally broken
-        TRUE ~ str_replace_all(Cross_Name, "\\s+", "") %>% str_replace("^SS", "ss_")
+        # Fallback: Changes SP to sp_
+        TRUE ~ str_replace_all(Cross_Name, "\\s+", "") %>% str_replace("^SP", "sp_")
       )
     ) %>%  
-    # NEW: Keep SubBlock in the final selection
     select(Plot, Block, SubBlock, Family_name)
   
   return(final_design)
@@ -102,11 +103,11 @@ parse_xlsx_design_file <- function(filepath, exp_prefix) {
     select(any_of(c("Plot", "Block", "Seedlot", "SubBlock"))) %>%
     filter(!is.na(Plot)) %>%
     mutate(Seedlot = if_else(str_trim(Seedlot) == "", NA_character_, Seedlot)) %>%
-    # 1. Extract standard crosses (those with two SS's)
+    # NEW: Changed SS to SP to match standard Scots Pine crosses
     extract(
       Seedlot,
       into = c("Maternal_ID", "Paternal_ID"),
-      regex = "^.*?=\\s*SS\\s*(\\d+)\\s*SS\\s*(.*)$",
+      regex = "^.*?=\\s*SP\\s*(\\d+)\\s*SP\\s*(.*)$",
       remove = FALSE
     ) %>%
     mutate(
@@ -114,32 +115,22 @@ parse_xlsx_design_file <- function(filepath, exp_prefix) {
       Maternal_ID = str_trim(Maternal_ID),
       Paternal_ID = str_trim(Paternal_ID),
       
-      # 2. Safely extract Control names (looks for the starting asterisk)
+      # NEW: Changed SS to SP for Control names safely
       Control_Name = if_else(
         str_detect(Seedlot, "^\\*"),
-        str_trim(str_replace(Seedlot, "^\\*.*?=\\s*SS\\s*", "")),
+        str_trim(str_replace(Seedlot, "^\\*.*?=\\s*SP\\s*", "")),
         NA_character_
       ),
       
-      # 3. Updated Family_name logic
+      # NEW: Updated Family_name logic with 'sp' instead of 'ss'
       Family_name = case_when(
-        # If it's a control, format it (e.g., "Control_70(7111)1")
-        !is.na(Control_Name) ~ paste0("ss", Control_Name),
-        
-        # If it's an Open Pollinated cross
-        !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0("ss", Maternal_ID, "_OPCB"),
-        
-        # If it's a valid standard cross
-        !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0("ss", Maternal_ID, "_ss", Paternal_ID),
-        
-        # Only assign Filler if the Seedlot is genuinely missing/blank
+        !is.na(Control_Name) ~ paste0("sp", Control_Name),
+        !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0("sp", Maternal_ID, "_OPCB"),
+        !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0("sp", Maternal_ID, "_sp", Paternal_ID),
         is.na(Seedlot) ~ paste0(exp_prefix, "_Filler"),
-        
-        # Catch-all fallback
         TRUE ~ paste0(exp_prefix, "_Filler")
       )
     ) %>%
-    # Clean up the temporary control column
     select(any_of(c("Plot", "Block", "SubBlock", "Family_name")))
   
   return(clean_design)
@@ -534,7 +525,6 @@ fix_mirrored_traits_8x1 <- function(long_data) {
               Mirror_Flag = paste0("Mirrored data moved FROM Tree ", measured_trees_raw, 
                                    " TO Tree ", measured_trees_flip, " for Trait: ", trt)
             )
-            
             mirror_flags <- bind_rows(mirror_flags, new_flags)
             
             # Apply permanent fix to the data
@@ -592,19 +582,32 @@ if (file.exists(trait_path)) {
   stop(paste("Error: Trait file not found at:", trait_path))
 }
 
-all_dirs <- list.dirs(path = file.path(data_dir,"High GCA Fullsib P85-P87 experiments"), recursive = FALSE, full.names = FALSE)
+all_dirs <- list.dirs(path = file.path(data_dir,"Trials"), recursive = FALSE, full.names = FALSE)
 
 experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", ".Rproj.user"))
 message(paste("Found", length(experiments_to_process), "folders to check."))
 
 # or do single 
-experiments_to_process <-c("Craigellachie 49")
+experiments_to_process <-c("Ardross13","Culloden10","Culloden11","Culloden12","Culloden13",
+                            "Culloden15","Culloden16","Culloden9","Naver20","Speymout22",
+                            "Thetford191","Thetford192","Thetford193","Thetford194", "Thetford195", 
+                            "Thetford196", "Thetford218", "Thetford219", "Thetford220", "Thetford226", 
+                            "Thetford227", "Wykeham134", "Wykeham135", "Wykeham136", "Wykeham137", 
+                            "Wykeham138", "Wykeham139", "Wykeham140", "Wykeham146", "Wykeham147")
+
+## F30<-F30 <- c("Ardross13","Culloden10","Culloden11","Culloden12","Culloden13",
+# "Culloden15","Culloden16","Culloden9","Naver20","Speymout22",
+# "Thetford191","Thetford192","Thetford193","Thetford194", "Thetford195", 
+# "Thetford196", "Thetford218", "Thetford219", "Thetford220", "Thetford226", 
+# "Thetford227", "Wykeham134", "Wykeham135", "Wykeham136", "Wykeham137", 
+# "Wykeham138", "Wykeham139", "Wykeham140", "Wykeham146", "Wykeham147")
+
 
 # # # # # # # # # # # # # # # # # #
 # PART 2: MAIN PROCESSING LOOP #########################
 # # # # # # # # # # # # # # # # # # 
 
-root_path<-file.path(data_dir,"High GCA Fullsib P85-P87 experiments")
+root_path<-file.path(data_dir,"Trials")
 
 for (curr_exp in experiments_to_process) {
   
@@ -658,6 +661,7 @@ for (curr_exp in experiments_to_process) {
       message(paste("  -> Loading Design:", basename(design_path)))
       
       # Route to the correct parser based on file extension
+      # If it's explicitly an Excel file, use the xlsx parser. Otherwise, assume it's a text file.
       if (str_detect(design_path, "(?i)\\.xlsx$")) {
         genetic_info <- parse_xlsx_design_file(design_path, file_prefix) 
       } else {
@@ -736,18 +740,52 @@ for (curr_exp in experiments_to_process) {
           }
         }
       }
-    } else {
-      # NEW: Warn the user if no matrix file exists!
+    }else {
+      # <--- THIS IS THE NEW ELSE FOR THE MISSING FILE WARNING!
       message("  -> WARNING: No spatial matrix file (_Matrix.csv) found. Proceeding without spatial info.")
     }
     
     # 
     # STEP 2: MEASUREMENTS & RENAMING ####
     # 
+    # 1. Load the raw data and clean the names immediately
     if (str_detect(meas_path, "(?i)\\.csv$")) {
-      raw_data <- read_csv(meas_path, show_col_types = FALSE) 
+      raw_data <- read_csv(meas_path, show_col_types = FALSE) %>% clean_names()
     } else {
-      raw_data <- read_excel(meas_path) 
+      raw_data <- read_excel(meas_path) %>% clean_names()
+    }
+    
+    # 2. Dynamically identify the measurement column (handling typos)
+    meas_col <- intersect(c("measurment", "measurement", "value", "value_char"), names(raw_data))[1]
+    
+    if (!is.na(meas_col)) {
+      raw_data <- raw_data %>% rename(Measurement = !!sym(meas_col))
+    }
+    
+    # 3. GENERATE MISSING TREE IDs 
+    if (!"inferred_tree_position" %in% names(raw_data)) {
+      message("    -> Generating sequential Tree IDs for Multi-Tree Plot data...")
+      
+      raw_data <- raw_data %>%
+        group_by(assessment, assessment_year, plot) %>%
+        mutate(inferred_tree_position = row_number()) %>%
+        ungroup()
+    }
+    
+    # 4. Standardize the column names back to what your script expects
+    raw_data <- raw_data %>%
+      rename(
+        Plot = plot,
+        InferredTreePosition = inferred_tree_position,
+        Assessment = assessment,
+        `Assessment Year` = assessment_year
+      )
+    
+    # Safely handle the Unit column
+    if ("unit" %in% names(raw_data)) {
+      raw_data <- raw_data %>% rename(Unit = unit)
+    } else {
+      raw_data <- raw_data %>% mutate(Unit = NA_character_)
     }
     
     if(!is.null(genetic_info)) {
@@ -823,7 +861,7 @@ for (curr_exp in experiments_to_process) {
         Date = as.Date(NA), 
         Trait_Orig = paste0(Prefix, replace_na(UnitCode, ""), Age)
       ) %>%
-    
+      
       # 1. Find the absolute maximum planted trees for the plot
       group_by(Plot) %>%
       mutate(Max_Trees_Planted = max(Tree_Orig_Num, na.rm = TRUE)) %>% 
@@ -1085,7 +1123,7 @@ for (curr_exp in experiments_to_process) {
         Reject_Flag = case_when(
           is.na(Value_Num) ~ NA_real_,
           Flag_Outlier ~ 1,
-         !is.na(Shrinkage_Error) ~ 1,      # Turn shrinkage on or off with this line
+          !is.na(Shrinkage_Error) ~ 1,      # Turn shrinkage on or off with this line
           TRUE ~ 0
         )
       )
