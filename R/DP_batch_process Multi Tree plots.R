@@ -739,9 +739,9 @@ for (curr_exp in experiments_to_process) {
     # STEP 2: MEASUREMENTS & RENAMING ####
     # 
     if (str_detect(meas_path, "(?i)\\.csv$")) {
-      raw_data <- read_csv(meas_path, show_col_types = FALSE) %>% clean_names()
+      raw_data <- read_csv(meas_path, show_col_types = FALSE) 
     } else {
-      raw_data <- read_excel(meas_path) %>% clean_names()
+      raw_data <- read_excel(meas_path) 
     }
     
     if(!is.null(genetic_info)) {
