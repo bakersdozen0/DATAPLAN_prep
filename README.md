@@ -62,7 +62,7 @@ The script dynamically crawls the `TRIAL_SERIES` folder. For each trial (e.g., `
 ### 📊 Pipeline Outputs
 For each processed trial folder, the script generates:
 
-* `*_Full_Data_With_Flags.csv`: The master wide-format dataset containing all measurements, spatial coordinates, pedigree info, and binary `_reject` flags for invalid data.
+* `*_Full_Data_With_Flags.csv`: The master wide-format dataset containing all measurements, spatial coordinates, pedigree info, calculated survival for each age, and binary `_reject` flags for invalid data.
 * `*_graphs.pdf`: A comprehensive diagnostic report containing histograms, temporal shrinkage scatter plots, correlation matrices, and spatial heatmaps.
 * `*_Stats.csv`: A summary table of N, Mean, Min, Max, and CV% for all valid traits.
 * `*_Traits.xml`: The standardized XML trait definitions required for downstream evaluation.
