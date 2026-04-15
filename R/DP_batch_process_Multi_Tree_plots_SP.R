@@ -984,7 +984,7 @@ for (curr_exp in experiments_to_process) {
     }
     
     # Standardize trait cases and Fix Mirrored Traits ####
-    exp_data_long <- exp_data_long %>% mutate(Trait = str_to_upper(Trait))
+    exp_data_long <- exp_data_long %>% mutate(Trait = str_to_title(Trait))
     
     mirror_output <- fix_mirrored_traits_8x1(exp_data_long)
     exp_data_long <- mirror_output$data
