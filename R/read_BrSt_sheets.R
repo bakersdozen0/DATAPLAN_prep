@@ -1,3 +1,11 @@
+
+
+
+data_dir<-"//forestresearch.gov.uk/shares/CSFCC/Forest Resource and Product Assessment and Improvement/NRS-Tree Improvement/CONIFERS/SITKA SPRUCE/psi_DATAPLAN_prep"
+# SS On Z: 
+# "//forestresearch.gov.uk/shares/CSFCC/Forest Resource and Product Assessment and Improvement/NRS-Tree Improvement/CONIFERS/SITKA SPRUCE/psi_DATAPLAN_prep"
+
+
 library(here)
 library(tidyxl)
 library(dplyr)
@@ -6,6 +14,8 @@ library(purrr)
 library(stringr)
 library(readxl)
 library(writexl)
+library(ggplot2)
+
 
 process_kintyre_assessments <- function(layout_path) {
   
@@ -117,28 +127,23 @@ process_kintyre_assessments <- function(layout_path) {
   return(final_tidy_df)
 }
 
-# Execution:
+# Execution: ####
 # tidy_assessments <- process_kintyre_assessments("path/to/your/Kintyre 18_BrSt_filled.xlsx")
 # glimpse(tidy_assessments)
 
 
-# Example Usage:
-K18_Br_St<-here("Backwards Selected Fullsib P96-P99 experiments","Kintyre 18","Kintyre 18_BrSt_filled.xlsx")
-K17_Br_St<-here("Backwards Selected Fullsib P96-P99 experiments","Kintyre 17","Kintyre 17_BrSt_filled.xlsx")
+# Example Usage: ####
+K18_Br_St<-file.path(data_dir,"Backwards Selected Fullsib P96-P99 experiments","Kintyre 18","Kintyre 18_BrSt_filled.xlsx")
+K17_Br_St<-file.path(data_dir,"Backwards Selected Fullsib P96-P99 experiments","Kintyre 17","Kintyre 17_BrSt_filled.xlsx")
 
 tidy_data17 <- process_kintyre_assessments (K17_Br_St)
 tidy_data18 <- process_kintyre_assessments (K18_Br_St)
 print(head(tidy_data))
 
-write_xlsx(tidy_data17, here("Backwards Selected Fullsib P96-P99 experiments","Kintyre 17", "Kintyre_17_BrSt.xlsx"))
-write_xlsx(tidy_data18, here("Backwards Selected Fullsib P96-P99 experiments","Kintyre 18", "Kintyre_18_BrSt.xlsx"))
+write_xlsx(tidy_data17, file.path(data_dir,"Backwards Selected Fullsib P96-P99 experiments","Kintyre 17", "Kintyre_17_BrSt.xlsx"))
+write_xlsx(tidy_data18, file.path(data_dir,"Backwards Selected Fullsib P96-P99 experiments","Kintyre 18", "Kintyre_18_BrSt.xlsx"))
 
-####
 ### Histograms ####
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-
 # 1. Clean and pivot the data
 plot_data <- tidy_data %>%
   mutate(
