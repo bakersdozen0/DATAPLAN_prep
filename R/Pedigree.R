@@ -89,15 +89,19 @@ build_pedigree <- function(target_dir, founders, controls, op_families, species_
   
   # 3. BUILD GROUPS 
   grp_locat <- parent_meta %>% filter(!is.na(LOCAT)) %>% select(LOCAT, Origin) %>% distinct() %>%
-    mutate(Group_name = paste0(LOCAT, "_", Origin, "++"), Species = species_name, Type = "UKLR++", Description = paste("Selection group from", LOCAT, "Origin", Origin))
+    mutate(Group_name = paste0(LOCAT, "_", Origin, "++"), Species = "CBCSitka", Type = "UKLR++", Description = paste("Selection group from", LOCAT, "Origin", Origin))
   
   grp_cb <- op_families %>% filter(!is.na(LOCAT)) %>% select(LOCAT) %>% distinct() %>%
-    mutate(Group_name = paste0(LOCAT, "+"), Species = species_name, Type = "Clone Bank+", Description = paste("Open pollinated clone bank at", LOCAT))
+    mutate(Group_name = paste0(LOCAT, "+"), Species = "CBCSitka", Type = "Clone Bank+", Description = paste("Open pollinated clone bank at", LOCAT))
+  
+  # NEW: Extract the unique Groups from your updated Control import file
+  grp_controls <- controls %>% 
+    select(Group_name, Type, Description = Fam_description) %>% 
+    distinct()
   
   groups_final <- bind_rows(
-    grp_locat, grp_cb, 
-    controls %>% select(Group_name = Family_name, Type, Description = Fam_description),
-    tibble(Group_name = "Unknown", Species = species_name, Type = "Unknown", Description = "Dummy")
+    grp_locat, grp_cb, grp_controls,
+    tibble(Group_name = "Unknown", Species = "CBCSitka", Type = "Unknown", Description = "Dummy")
   ) %>% distinct(Group_name, .keep_all = TRUE) %>% mutate(Group_id = row_number())
   
   # 4. PROCESS OP FAMILIES
@@ -105,12 +109,12 @@ build_pedigree <- function(target_dir, founders, controls, op_families, species_
     mutate(Stage = 4, Dad_id = NA_character_) %>%
     select(Family_name, Mum_name, Mum_type, Dad_name, Dad_type, Fam_description, Stage, Dad_id)
   
-  # 5. PROCESS CONTROLS AS FAMILIES 
+  # ### FIX 1: PROCESS CONTROLS AS FAMILIES (Bumped down a level!) ###
   fam_controls <- controls %>%
     mutate(
-      Mum_name = "Unknown", Mum_type = "G",
-      Dad_name = "Unknown", Dad_type = "G",
-      Stage = 1, Dad_id = NA_character_
+      Mum_name = Group_name, Mum_type = "G", # Now points to the broad group
+      Dad_name = Group_name, Dad_type = "G", 
+      Stage = 2, Dad_id = NA_character_      # Bumped from Stage 1 to Stage 2
     ) %>%
     select(Family_name, Mum_name, Mum_type, Dad_name, Dad_type, Fam_description, Stage, Dad_id)
   
