@@ -303,10 +303,22 @@ generate_pdf_report <- function(long_data, wide_data, exp_name, multi_age_prefix
       plot_df <- wide_data %>% select(Plot, Tree, X_Val = all_of(t1), Y_Val = all_of(t2)) %>%
         filter(!is.na(X_Val), !is.na(Y_Val)) %>% left_join(outlier_plots, by = c("Plot", "Tree")) %>% mutate(Status = replace_na(Status, "Normal"))
       
-      if(nrow(plot_df) == 0) next
-      p_corr <- ggplot(plot_df, aes(x=X_Val, y=Y_Val)) + geom_smooth(method = "lm", se = FALSE, color = "gray", linetype = "dashed", alpha=0.5) +
-        geom_point(aes(color = Status), alpha = 0.6) + scale_color_manual(values = c("Normal" = "black", "Outlier" = "orange")) +
-        labs(title="Correlation Check", x = t1, y = t2) + theme_minimal()
+      if(nrow(plot_df) < 3) next
+      
+      # Calculate the correlation coefficient
+      cor_val <- round(cor(plot_df$X_Val, plot_df$Y_Val, method = "spearman"), 3)
+      
+      p_corr <- ggplot(plot_df, aes(x=X_Val, y=Y_Val)) + 
+        geom_smooth(method = "lm", se = FALSE, color = "gray", linetype = "dashed", alpha=0.5) +
+        geom_point(aes(color = Status), alpha = 0.6) + 
+        scale_color_manual(values = c("Normal" = "black", "Outlier" = "orange")) +
+        labs(
+          title = "Correlation Check", 
+          subtitle = paste("Spearman Rho:", cor_val, "| N:", nrow(plot_df)), # Added to print on the PDF
+          x = t1, 
+          y = t2
+        ) + 
+        theme_minimal()
       print(p_corr)
     }
   }
@@ -356,66 +368,39 @@ map_interior_trees <- function(tree_idx, subset_size, full_size) {
   return(mapped_idx)
 }
 
-# --- 5. Detect and Reverse Mirrored Plots ---
-fix_mirrored_traits_8x1 <- function(long_data) {
-  mirror_flags <- tibble(Plot = character(), Tree = numeric(), Trait = character(), Mirror_Flag = character())
-  exp_max_tree <- max(suppressWarnings(as.numeric(long_data$Tree)), na.rm = TRUE)
-  if (exp_max_tree != 8) {
-    message(paste("  -> Skipping mirror fix: Experiment max tree is", exp_max_tree, "(Not an 8x1 design)."))
-    return(list(data = long_data, flags = mirror_flags))
+# --- 5. Traversal/ Data orientation correction ---
+get_grid_layout <- function(plot_size, interior_only = FALSE) {
+  if (plot_size <= 8) return(matrix(1:8, nrow=1))
+  n <- as.integer(sqrt(plot_size))
+  mat <- matrix(1:(n*n), nrow=n, byrow=TRUE)
+  if(interior_only && n >= 3) mat <- mat[2:(n-1), 2:(n-1)]
+  return(mat)
+}
+
+get_traversal_path <- function(layout_mat, start_corner="top_left", direction="horizontal", snake=FALSE) {
+  if (length(layout_mat) == 8) {
+    if (start_corner %in% c("reversed", "bottom_right")) return(rev(as.vector(layout_mat)))
+    return(as.vector(layout_mat))
   }
+  n_rows <- nrow(layout_mat); n_cols <- ncol(layout_mat)
+  row_indices <- if (start_corner %in% c("bottom_left", "bottom_right")) rev(seq_len(n_rows)) else seq_len(n_rows)
+  col_indices <- if (start_corner %in% c("top_right", "bottom_right")) rev(seq_len(n_cols)) else seq_len(n_cols)
   
-  valid_plots <- long_data %>% mutate(Tree_Num = suppressWarnings(as.numeric(Tree))) %>% filter(!is.na(Tree_Num), Tree_Num <= 8) %>% pull(Plot) %>% unique()
-  if(length(valid_plots) == 0) return(list(data = long_data, flags = mirror_flags))
-  
-  fixed_data <- long_data
-  plots_fixed_count <- 0
-  
-  for (p in valid_plots) {
-    plot_data <- long_data %>% filter(Plot == p, !is.na(Value_Num), !str_detect(Trait, "(?i)Sur_")) %>%
-      mutate(Age_Num = suppressWarnings(as.numeric(str_extract(Trait, "\\d+$"))), Tree_Num = suppressWarnings(as.numeric(Tree))) %>%
-      filter(!is.na(Age_Num), !is.na(Tree_Num))
-    
-    plot_ages <- sort(unique(plot_data$Age_Num))
-    if(length(plot_ages) < 2) next
-    
-    plot_fixed_any <- FALSE
-    baseline_alive <- plot_data %>% filter(Age_Num == plot_ages[1]) %>% pull(Tree_Num) %>% unique()
-    
-    for (i in 2:length(plot_ages)) {
-      target_age <- plot_ages[i]
-      traits_at_age <- plot_data %>% filter(Age_Num == target_age) %>% pull(Trait) %>% unique()
-      trees_measured_this_age <- c()
-      
-      for (trt in traits_at_age) {
-        measured_trees_raw <- plot_data %>% filter(Trait == trt) %>% pull(Tree_Num) %>% unique()
-        res_raw <- sum(!measured_trees_raw %in% baseline_alive)
-        
-        if (res_raw > 0) {
-          measured_trees_flip <- 9 - measured_trees_raw
-          res_flip <- sum(!measured_trees_flip %in% baseline_alive)
-          
-          if (res_flip == 0) {
-            message(paste("    -> Successfully flipped Plot", p, "for Trait:", trt))
-            new_flags <- tibble(Plot = p, Tree = measured_trees_flip, Trait = trt, Mirror_Flag = paste0("Mirrored data moved FROM Tree ", measured_trees_raw, " TO Tree ", measured_trees_flip, " for Trait: ", trt))
-            mirror_flags <- bind_rows(mirror_flags, new_flags)
-            fixed_data <- fixed_data %>% mutate(Tree = if_else(Plot == p & Trait == trt, 9 - Tree, Tree))
-            trees_measured_this_age <- c(trees_measured_this_age, measured_trees_flip)
-            plot_fixed_any <- TRUE
-          } else {
-            trees_measured_this_age <- c(trees_measured_this_age, measured_trees_raw)
-          }
-        } else {
-          trees_measured_this_age <- c(trees_measured_this_age, measured_trees_raw)
-        }
-      }
-      baseline_alive <- intersect(baseline_alive, unique(trees_measured_this_age))
+  path <- c()
+  if (direction == "horizontal") {
+    for (i_idx in seq_along(row_indices)) {
+      i <- row_indices[i_idx]; cols <- col_indices
+      if (snake && i_idx %% 2 == 0) cols <- rev(cols)
+      for (j in cols) path <- c(path, layout_mat[i, j])
     }
-    if(plot_fixed_any) plots_fixed_count <- plots_fixed_count + 1
+  } else {
+    for (j_idx in seq_along(col_indices)) {
+      j <- col_indices[j_idx]; rows <- row_indices
+      if (snake && j_idx %% 2 == 0) rows <- rev(rows)
+      for (i in rows) path <- c(path, layout_mat[i, j])
+    }
   }
-  
-  if (plots_fixed_count > 0) message(paste("\n  -> Trait Reversal complete. Fixed instances in", plots_fixed_count, "problem plots."))
-  return(list(data = fixed_data, flags = mirror_flags))
+  return(path)
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # 
@@ -437,7 +422,7 @@ experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", "
 message(paste("Found", length(experiments_to_process), "folders to check."))
 
 # NOTE: Uncomment and set this to run specific folders for testing!
-# experiments_to_process <- c("Radnor 55")
+experiments_to_process <- c("Arecleoch 12")
 
 # # # # # # # # # # # # # # # # # # # # # # # 
 # PART 2: MAIN PROCESSING LOOP ####
@@ -640,7 +625,8 @@ for (curr_exp in experiments_to_process) {
         Tree_Orig_Num = suppressWarnings(as.numeric(Tree_Orig)), 
         Value_Num = suppressWarnings(as.numeric(Value_Char)),
         Prefix = str_to_upper(str_trim(replace_na(TraitCode, ""))),
-        Age = as.character(Age), Date = as.Date(NA), Trait_Orig = paste0(Prefix, replace_na(UnitCode, ""), Age)
+        Age = str_pad(as.character(Age), width = 2, pad = "0"), # <--- FORCES LEADING ZEROS
+        Date = as.Date(NA), Trait_Orig = paste0(Prefix, replace_na(UnitCode, ""), Age)
       )
     
     # Map Trees (Bypass for Single-Tree)
@@ -670,6 +656,7 @@ for (curr_exp in experiments_to_process) {
     if (length(ad_files) > 0) {
       for (ad_path in ad_files) {
         ad_age <- str_extract(basename(ad_path), "(?i)_AD_(\\d+)") %>% str_extract("\\d+")
+        ad_age <- str_pad(ad_age, width = 2, pad = "0") # <--- FORCES LEADING ZEROS
         message(paste("  -> Loading Additional Data:", basename(ad_path)))
         ad_raw <- if (str_detect(basename(ad_path), "(?i)\\.csv$")) read_csv(ad_path, col_types = cols(.default = "c")) else read_excel(ad_path, col_types = "text")
         
@@ -703,12 +690,67 @@ for (curr_exp in experiments_to_process) {
     
     exp_data_long <- exp_data_long %>% mutate(Trait = str_to_title(Trait))
     
-    # Conditional Mirror Fix
+    # =====================================================================
+    # 5. ASSESSOR BEHAVIORAL DIAGNOSTIC & CORRECTIONS
+    # =====================================================================
+    applied_corrections <- FALSE
+    
     if(PLOT_TYPE == "MULTI") {
-      mirror_output <- fix_mirrored_traits_8x1(exp_data_long)
-      exp_data_long <- mirror_output$data
-      exp_mirror_flags <- mirror_output$flags
+      helper_path <- file.path(exp_path, "TRAVERSAL_HELPER_MASTER.csv")
+      exp_mirror_flags <- tibble(Plot = character(), Tree = numeric(), Mirror_Flag = character())
+      
+      if (file.exists(helper_path)) {
+        message("   -> Found TRAVERSAL_HELPER_MASTER.csv! Applying surgical orientation fixes...")
+        applied_corrections <- TRUE
+        
+        traversal_helper <- read_csv(helper_path, show_col_types = FALSE) %>% mutate(Plot = as.character(Plot))
+        
+        # Process each rule (Plot/Trait combination) individually
+        for (i in 1:nrow(traversal_helper)) {
+          rule <- traversal_helper[i, ]
+          
+          target_data <- exp_data_long %>% filter(Plot == rule$Plot, Trait == rule$Trait_ID, !is.na(Value_Num))
+          if (nrow(target_data) == 0) {
+            message(paste("      -> WARNING: Correction skipped. Could not find data for Plot", rule$Plot, "Trait", rule$Trait_ID))
+            next
+          }
+          
+          # Auto-detect frame size
+          plot_all_trees <- exp_data_long %>% filter(Plot == rule$Plot, !is.na(Tree)) %>% pull(Tree) %>% as.numeric()
+          plot_size <- max(plot_all_trees, na.rm = TRUE)
+          if (plot_size <= 8) plot_size <- 8 else if (plot_size <= 25) plot_size <- 25 else if (plot_size <= 49) plot_size <- 49 else plot_size <- max(plot_all_trees)
+          
+          # Auto-detect interior status
+          trait_trees <- unique(target_data$Tree) %>% as.numeric()
+          layout_interior <- as.vector(get_grid_layout(plot_size, interior_only = TRUE))
+          is_trait_interior <- (plot_size > 8 && length(trait_trees) > 0 && all(trait_trees %in% layout_interior))
+          
+          layout_mat <- get_grid_layout(plot_size, interior_only = is_trait_interior)
+          canonical_path <- get_traversal_path(layout_mat, "top_left", "horizontal", FALSE)
+          tested_path <- get_traversal_path(layout_mat, rule$Best_Start, rule$Best_Dir, as.logical(rule$Best_Snake))
+          
+          translation_df <- tibble(Original_Tree = as.numeric(canonical_path), Mapped_Tree = as.numeric(tested_path))
+          
+          # Apply the surgical swap
+          exp_data_long <- exp_data_long %>%
+            left_join(translation_df, by = c("Tree" = "Original_Tree")) %>%
+            mutate(Tree = if_else(Plot == rule$Plot & Trait == rule$Trait_ID & !is.na(Mapped_Tree), Mapped_Tree, Tree)) %>%
+            select(-Mapped_Tree)
+          
+          # Log the action so it appears in the final Validation_record column
+          anchor_text <- if("Anchor_Used" %in% names(rule)) paste(" (Anchored to", rule$Anchor_Used, ")") else ""
+          
+          exp_mirror_flags <- bind_rows(exp_mirror_flags, tibble(
+            Plot = rule$Plot, Tree = trait_trees, 
+            Mirror_Flag = sprintf("ID Realigned from %s %s%s", toupper(rule$Best_Start), toupper(rule$Best_Dir), anchor_text)
+          ))
+        }
+        message(paste("   -> Applied", nrow(traversal_helper), "plot-specific traversal corrections."))
+      } else {
+        message("   -> No TRAVERSAL_HELPER found. Using standard orientation.")
+      }
     } else {
+      # If PLOT_TYPE is SINGLE, we skip traversal logic entirely
       exp_mirror_flags <- tibble(Plot = character(), Tree = numeric(), Mirror_Flag = character())
     }
     
@@ -782,24 +824,28 @@ for (curr_exp in experiments_to_process) {
       final_wide_with_flags <- final_wide_with_flags %>% left_join(exp_mirror_summary, by = c("Plot", "Tree")) %>% mutate(Validation_record = case_when(!is.na(Combined_Mirror_Flags) & (is.na(Validation_record) | Validation_record == "") ~ Combined_Mirror_Flags, !is.na(Combined_Mirror_Flags) ~ paste(Validation_record, "|", Combined_Mirror_Flags), TRUE ~ Validation_record)) %>% select(-Combined_Mirror_Flags)
     }
     
-    write_csv(final_wide_with_flags, file.path(exp_path, paste0(file_prefix, "_Full_Data_With_Flags.csv")), na = "")
+    out_suffix <- if (applied_corrections) "_Corrected" else ""
+    write_csv(final_wide_with_flags, file.path(exp_path, paste0(file_prefix, "_Full_Data_With_Flags", out_suffix, ".csv")), na = "")
+    
     
     # PDF & Stats
     try({
-      pdf(file.path(exp_path, paste0(file_prefix, "_graphs.pdf")), width = 8, height = 11)
+      # FIX: Moved out_suffix before the file extension!
+      pdf(file.path(exp_path, paste0(file_prefix, out_suffix, "_graphs.pdf")), width = 8, height = 11)
       generate_pdf_report(final_long_dedup, exp_data_wide_numeric, curr_exp, unique(final_long_dedup$Prefix), unique(final_long_dedup$Trait))
       dev.off()
     })
     while(dev.cur() > 1) dev.off()
     
     stats_df <- final_long_dedup %>% filter(Reject_Flag == 0) %>% group_by(Trait) %>% summarise(N_Valid = sum(!is.na(Value_Num)), Mean = mean(Value_Num, na.rm=TRUE), Std_Dev = sd(Value_Num, na.rm=TRUE), Min = min(Value_Num, na.rm=TRUE), Max = max(Value_Num, na.rm=TRUE), CV_Pct = (sd(Value_Num, na.rm=TRUE)/mean(Value_Num, na.rm=TRUE))*100) %>% mutate(across(where(is.numeric), ~ round(., 2)))
-    write_csv(stats_df, file.path(exp_path, paste0(curr_exp, "_Stats.csv")), na = "")
+    write_csv(stats_df, file.path(exp_path, paste0(curr_exp, "_Stats", out_suffix, ".csv")), na = "")
     
     # --- 9. XML Generation ---
     xml_data <- data_with_outliers %>% group_by(Trait) %>% mutate(Calc_Vals = if_else(Value_Num > 0, Value_Num, NA_real_), Min_Val = min(Calc_Vals, na.rm = TRUE), Max_Val = max(Calc_Vals, na.rm = TRUE), Trait_Date = if(length(Date[!is.na(Date)]) > 0) as.character(Date[!is.na(Date)][1]) else NA_character_) %>% ungroup() %>% distinct(Trait, Trait_Orig, Prefix, Age, UnitCode, Is_Ordinal, Min_Val, Max_Val, Trait_Date) %>% left_join(trait_map, by = c("Prefix" = "trait_code_FR")) %>%
       mutate(Group = case_when(!is.na(xml_group) & xml_group != "" ~ xml_group, str_detect(Prefix, "(?i)SUR") ~ "Health", TRUE ~ "Uncategorized"), Desc_Base = coalesce(xml_desc_base, Prefix), Real_Units = case_when(!is.na(xml_units) & xml_units != "none" & xml_units != "" ~ xml_units, Is_Ordinal & is.finite(Min_Val) ~ paste0("$", Min_Val, "-", Max_Val), str_detect(Trait, "(?i)Sur") ~ "0/$1", str_detect(Trait, "(?i)Pil") ~ "mm", str_detect(Trait, "(?i)Av") ~ "m/s", !is.na(UnitCode) & UnitCode != "" ~ str_to_lower(UnitCode), TRUE ~ "unitless"), Full_Description = paste0(Desc_Base, " Age ", Age, " (was ", Trait_Orig, ")", if_else(!is.na(Trait_Date), paste(" Date:", Trait_Date), "")), XML_Tag = sprintf('<trait group_name="%s" name="%s" trait_type="M" description="%s" data_type="N" is_solver_mappable="1" summary_rule="first_with_reject" units="%s" validate="none" />', Group, Trait, Full_Description, Real_Units)) %>% arrange(Trait)
     
-    writeLines(c("<trial>", "<traitlist>", xml_data$XML_Tag, "</traitlist>", "</trial>"), file.path(exp_path, paste0(file_prefix, "_Traits.xml")))
+    # FIX: Added out_suffix to the XML export as well!
+    writeLines(c("<trial>", "<traitlist>", xml_data$XML_Tag, "</traitlist>", "</trial>"), file.path(exp_path, paste0(file_prefix, out_suffix, "_Traits.xml")))
     message("  -> Processed & Saved.")
     
   }, error = function(e) { message(paste("  -> ERROR processing", curr_exp, ": ", e$message)) })
