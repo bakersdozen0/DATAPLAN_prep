@@ -3,7 +3,7 @@
 # =====================================================================
 
 # 1. Base Paths & Species Identifiers
-BASE_DIR      <- "//forestresearch.gov.uk/shares/CSFCC/Forest Resource and Product Assessment and Improvement/NRS-Tree Improvement/CONIFERS/SITKA SPRUCE/psi_DATAPLAN_prep"
+BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka"
 
 
 # SS On Z: 

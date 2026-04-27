@@ -15,7 +15,7 @@ library(janitor)
 # =====================================================================
 PLOT_TYPE     <- "MULTI" # Options: "SINGLE" or "MULTI"
 # 1. Define the main species folder (Where the Traits Excel file lives)
-BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Scots_Pine"
+BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka"
 
 # SS On Z: 
 # "//forestresearch.gov.uk/shares/CSFCC/Forest Resource and Product Assessment and Improvement/NRS-Tree Improvement/CONIFERS/SITKA SPRUCE/psi_DATAPLAN_prep"
@@ -26,7 +26,7 @@ BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritish
 
 
 # 2. Define the specific subfolder containing the trials you want to process today
-TRIAL_SERIES  <- "Trials" 
+TRIAL_SERIES  <- "High GCA Fullsib P85-P87 experiments" 
 ### e.g.: "High GCA Fullsib P85-P87 experiments" / "Backwards Selected Fullsib P96-P99 experiments" / "Trials" (For SP)
 # (e.g., switch this to "Backwards Selected Fullsib P96-P99 experiments" when needed)
 
@@ -437,7 +437,7 @@ experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", "
 message(paste("Found", length(experiments_to_process), "folders to check."))
 
 # NOTE: Uncomment and set this to run specific folders for testing!
-experiments_to_process <- c("Thetford191")
+# experiments_to_process <- c("Radnor 55")
 
 # # # # # # # # # # # # # # # # # # # # # # # 
 # PART 2: MAIN PROCESSING LOOP ####
@@ -517,19 +517,65 @@ for (curr_exp in experiments_to_process) {
       spatial_info <- prowppos(raw_matrix)
       
       if (!is.null(spatial_info)) {
-        spatial_info <- spatial_info %>% mutate(Plot = as.character(Plot), Tree = suppressWarnings(as.numeric(Tree)), Prow = suppressWarnings(as.numeric(Prow)), Ppos = suppressWarnings(as.numeric(Ppos))) %>% filter(!is.na(Plot))
+        spatial_info <- spatial_info %>% 
+          mutate(
+            Plot = as.character(Plot), 
+            Tree = suppressWarnings(as.numeric(Tree)), 
+            Prow = suppressWarnings(as.numeric(Prow)), 
+            Ppos = suppressWarnings(as.numeric(Ppos))
+          ) %>% 
+          filter(!is.na(Plot))
         
-        filler_plots <- spatial_info %>% filter(str_detect(Plot, "(?i)Filler")) %>% distinct(Plot)
-        spatial_info <- spatial_info %>% select(Plot, Tree, Prow, Ppos)
+        # 1. Identify any plots containing the word "Filler"
+        filler_plots <- spatial_info %>% 
+          filter(str_detect(Plot, "(?i)Filler")) %>% 
+          distinct(Plot)
         
         if (nrow(filler_plots) > 0) {
-          filler_addition <- filler_plots %>% mutate(Block = "0", Family_name = paste0(file_prefix, "_Filler"))
-          genetic_info <- if(is.null(genetic_info)) filler_addition else bind_rows(genetic_info %>% mutate(Plot = as.character(Plot)), filler_addition)
+          # 2. Find the highest existing numeric plot number (from design or spatial)
+          existing_plots <- c(
+            suppressWarnings(as.numeric(spatial_info$Plot)),
+            if (!is.null(genetic_info)) suppressWarnings(as.numeric(genetic_info$Plot)) else c()
+          )
+          max_plot <- max(c(0, existing_plots), na.rm = TRUE)
+          
+          # 3. Create a mapping table: Filler -> New Numeric ID
+          filler_mapping <- filler_plots %>%
+            mutate(New_Plot = as.character(max_plot + row_number()))
+          
+          # 4. Update spatial_info with the new numeric IDs
+          spatial_info <- spatial_info %>%
+            left_join(filler_mapping, by = "Plot") %>%
+            mutate(Plot = if_else(!is.na(New_Plot), New_Plot, Plot)) %>%
+            select(Plot, Tree, Prow, Ppos)
+          
+          # 5. Build the genetic info additions using the NEW plot IDs
+          filler_addition <- filler_mapping %>%
+            mutate(
+              Plot = New_Plot, # OVERWRITE the old text "Filler" with the new numeric ID
+              Block = "0", 
+              SubBlock = NA_character_, 
+              Family_name = paste0(file_prefix, "_Filler")
+            ) %>%
+            select(Plot, Block, SubBlock, Family_name)
+          
+          # 6. Append to genetic_info
+          if (is.null(genetic_info)) {
+            genetic_info <- filler_addition
+          } else {
+            genetic_info <- bind_rows(
+              genetic_info %>% mutate(Plot = as.character(Plot)), 
+              filler_addition
+            )
+          }
+        } else {
+          spatial_info <- spatial_info %>% select(Plot, Tree, Prow, Ppos)
         }
       }
     } else {
       message("  -> WARNING: No spatial matrix file found. Proceeding without coords.")
     }
+    
     
     # --- 5. Measurements & Renaming ---
     if (str_detect(meas_path, "(?i)\\.csv$")) raw_data <- read_csv(meas_path, col_types = cols(.default = "c")) %>% clean_names() else raw_data <- read_excel(meas_path, col_types = "text") %>% clean_names()
