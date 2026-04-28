@@ -300,8 +300,11 @@ generate_pdf_report <- function(long_data, wide_data, exp_name, multi_age_prefix
       if(!all(c(t1, t2) %in% names(wide_data))) next
       
       outlier_plots <- long_data %>% filter(Trait %in% c(t1, t2), Flag_Outlier == TRUE) %>% select(Plot, Tree) %>% distinct() %>% mutate(Status = "Outlier")
+      
+      # FIX: Added X_Val != 0 and Y_Val != 0 to explicitly drop erroneous zeros from the math and the plot
       plot_df <- wide_data %>% select(Plot, Tree, X_Val = all_of(t1), Y_Val = all_of(t2)) %>%
-        filter(!is.na(X_Val), !is.na(Y_Val)) %>% left_join(outlier_plots, by = c("Plot", "Tree")) %>% mutate(Status = replace_na(Status, "Normal"))
+        filter(!is.na(X_Val), !is.na(Y_Val), X_Val != 0, Y_Val != 0) %>% 
+        left_join(outlier_plots, by = c("Plot", "Tree")) %>% mutate(Status = replace_na(Status, "Normal"))
       
       if(nrow(plot_df) < 3) next
       
@@ -422,7 +425,7 @@ experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", "
 message(paste("Found", length(experiments_to_process), "folders to check."))
 
 # NOTE: Uncomment and set this to run specific folders for testing!
-experiments_to_process <- c("Arecleoch 12")
+experiments_to_process <- c("Ae 60")
 
 # # # # # # # # # # # # # # # # # # # # # # # 
 # PART 2: MAIN PROCESSING LOOP ####
