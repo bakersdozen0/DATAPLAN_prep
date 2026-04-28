@@ -14,14 +14,44 @@ PLOT_SIZE      <- 49       # Options: 8 (for 8x1 arrays) or 49 (for 7x7 grids), 
 
 # The Trusted Baseline (Typically whichever growth metric that has sensible correlations)
 BASELINE_TRAIT <- "Dm_15"  
-BASELINE_SURV  <- "Sur_15" 
 
 # List ALL traits you suspect might have traversal errors. 
 # You can list one, or ten! e.g., c("Ht_03", "Pil_17", "Fr_05")  
 # NB: Traits that correlate well with each other but poorly with other growth traits are extremely suspect! 
 TEST_TRAITS    <- c("Ht_03", "Ht_06") 
 
-OUTPUT_DIR     <- dirname(WIDE_DATA_CSV)
+#
+#### TEMPORAL CHAINING TOGGLE: 
+#### Set to TRUE to run the diagnostic on the '_Corrected.csv' file instead of the raw data
+#
+USE_CORRECTED_DATA <- TRUE
+#
+####
+####
+#
+
+# --- Auto-Path Logic & Subdirectory Management (Do not edit) ---
+if(USE_CORRECTED_DATA) {
+  WIDE_DATA_CSV <- stringr::str_replace(RAW_WIDE_DATA_CSV, "(?i)\\.csv$", "_Corrected.csv")
+  out_suffix <- "_Chained"
+} else {
+  WIDE_DATA_CSV <- RAW_WIDE_DATA_CSV
+  out_suffix <- ""
+}
+
+OUTPUT_DIR <- dirname(WIDE_DATA_CSV)
+DIAG_DIR   <- file.path(OUTPUT_DIR, "Traversal_Diagnostics")
+
+# Create the diagnostics subdirectory if it doesn't exist
+if(!dir.exists(DIAG_DIR)) dir.create(DIAG_DIR)
+
+# Backup the Master Helper if we are doing a chained run
+helper_path <- file.path(OUTPUT_DIR, "TRAVERSAL_HELPER_MASTER.csv")
+if (USE_CORRECTED_DATA && file.exists(helper_path)) {
+  backup_name <- paste0("TRAVERSAL_HELPER_MASTER_PreChainBackup_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
+  file.copy(helper_path, file.path(DIAG_DIR, backup_name))
+  message(paste("Backed up original Master Helper to:", backup_name))
+}
 
 # ============================================================================
 #### 2. VIRTUAL ASSESSOR MATH ENGINE ####
@@ -76,14 +106,25 @@ for (TEST_TRAIT in TEST_TRAITS) {
   cat(">>> INITIATING DIAGNOSTIC FOR TRAIT:", TEST_TRAIT, "<<<\n")
   cat("======================================================================\n")
   
-  # --- Smart Survival Matcher ---
-  # Extracts the age (e.g., "03") and builds the survival column name ("Sur_03")
-  trait_age <- str_extract(TEST_TRAIT, "\\d+")
-  TEST_SURV <- paste0("Sur_", trait_age)
+  # --- 3a. Auto-Detect Baseline Survival ---
+  base_age <- suppressWarnings(as.numeric(str_extract(BASELINE_TRAIT, "\\d+")))
   
-  if (!TEST_SURV %in% names(df_raw)) {
-    message(paste("WARNING: Could not find survival column", TEST_SURV, "in data. Skipping", TEST_TRAIT))
-    next
+  # 1. Guess the exact matching survival trait based on the zero-padded age
+  target_surv_base <- paste0("Sur_", str_pad(base_age, 2, pad = "0"))
+  
+  # 2. Check if it exists. If not, find the closest one chronologically.
+  if (target_surv_base %in% names(wide_data)) {
+    BASELINE_SURV <- target_surv_base
+  } else {
+    surv_cols <- grep("(?i)^Sur_", names(wide_data), value = TRUE)
+    if (length(surv_cols) > 0) {
+      surv_ages <- suppressWarnings(as.numeric(str_extract(surv_cols, "\\d+")))
+      closest_idx <- which.min(abs(surv_ages - base_age))
+      BASELINE_SURV <- surv_cols[closest_idx]
+      message(paste("  -> Exact survival not found. Auto-detected closest BASELINE_SURV:", BASELINE_SURV))
+    } else {
+      stop("CRITICAL ERROR: No survival traits found in dataset. Zombie filter cannot run.")
+    }
   }
   
   # --- Data Loading & Zero Filtering ---
@@ -113,7 +154,6 @@ for (TEST_TRAIT in TEST_TRAITS) {
   layout_mat <- get_grid_layout(PLOT_SIZE, interior_only = is_test_interior)
   canonical_path <- get_traversal_path(layout_mat, "top_left", "horizontal", FALSE)
   
-  # ADD THESE TWO LINES right before Step 4:
   base_age <- suppressWarnings(as.numeric(str_extract(BASELINE_TRAIT, "\\d+")))
   test_age <- suppressWarnings(as.numeric(str_extract(TEST_TRAIT, "\\d+")))
   
@@ -189,8 +229,8 @@ for (TEST_TRAIT in TEST_TRAITS) {
     select(Plot, Action_Required, Best_Start = start_corner, Best_Dir = direction, Best_Snake = snake, Best_Cor = Spearman_Cor, Normal_Cor, Sample_Size) %>%
     arrange(desc(Action_Required))
   
-  write_csv(all_results, file.path(OUTPUT_DIR, paste0(BASELINE_TRAIT, "_vs_", TEST_TRAIT, "_All_Permutations.csv")))
-  write_csv(recommendations, file.path(OUTPUT_DIR, paste0("Suggested_Fixes_", TEST_TRAIT, ".csv")))
+  write_csv(all_results, file.path(DIAG_DIR, paste0(BASELINE_TRAIT, "_vs_", TEST_TRAIT, out_suffix, "_All_Permutations.csv")))
+  write_csv(recommendations, file.path(DIAG_DIR, paste0("Suggested_Fixes_", TEST_TRAIT, "_anchored_to_", BASELINE_TRAIT, out_suffix, ".csv")))
   
   # --- Visualization ---
   message("Generating visualization panels...")
@@ -234,7 +274,7 @@ for (TEST_TRAIT in TEST_TRAITS) {
     ) +
     theme(strip.background = element_rect(fill = "#ecf0f1"), strip.text = element_text(face = "bold", size = 11), plot.title = element_text(face = "bold", size = 14))
   
-  ggsave(file.path(OUTPUT_DIR, paste0(BASELINE_TRAIT, "_vs_", TEST_TRAIT, "_Correction_Plot.png")), p_compare, width = 12, height = 5)
+  ggsave(file.path(DIAG_DIR, paste0(BASELINE_TRAIT, "_vs_", TEST_TRAIT, out_suffix, "_Correction_Plot.jpg")), plot = p_final, width = 16, height = 6, dpi = 300)
   
   # --- Forensic Report ---
   target_desc <- "TOP-LEFT start, HORIZONTAL rows, TYPEWRITER (no snake)"
