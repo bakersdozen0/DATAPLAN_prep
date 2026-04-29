@@ -305,6 +305,124 @@ for (TEST_TRAIT in TEST_TRAITS) {
   
   ggsave(file.path(DIAG_DIR, paste0(BASELINE_TRAIT, "_vs_", TEST_TRAIT, out_suffix, "_Correction_Plot.png")), plot = p_compare, width = 16, height = 6, dpi = 300)
   
+  # --- Field Spatial Map of Traversal Patterns ---
+  message("Generating spatial map of field traversals...")
+  
+  has_standard <- "Row" %in% names(df_raw) && "Position" %in% names(df_raw)
+  has_p_coords <- "Prow" %in% names(df_raw) && "Ppos" %in% names(df_raw)
+  
+  if (has_standard || has_p_coords) {
+    
+    # 1. Base Tree Coordinates (Filtered to evaluated plots only)
+    plot_spatial_trees <- df_raw %>%
+      mutate(
+        Plot = as.character(Plot),
+        Map_Row = if(has_standard) as.numeric(Row) else as.numeric(Prow),
+        Map_Pos = if(has_standard) as.numeric(Position) else as.numeric(Ppos)
+      ) %>%
+      filter(!is.na(Map_Row) & !is.na(Map_Pos)) %>%
+      filter(Plot %in% recommendations$Plot) # Drops all non-numeric/filler trees
+    
+    # 2. Plot Bounding Boxes
+    plot_bounds <- plot_spatial_trees %>%
+      group_by(Plot) %>%
+      summarize(
+        min_R = min(Map_Row), max_R = max(Map_Row),
+        min_P = min(Map_Pos), max_P = max(Map_Pos),
+        Centroid_Row = mean(Map_Row), Centroid_Pos = mean(Map_Pos),
+        .groups = "drop"
+      )
+    
+    map_df <- recommendations %>%
+      mutate(Plot = as.character(Plot)) %>%
+      left_join(plot_bounds, by = "Plot") %>%
+      filter(!is.na(Centroid_Row)) %>%
+      mutate(
+        Path_Type = if_else(str_detect(Action_Required, "None"), 
+                            "Target (Normal)", 
+                            paste0(toupper(Best_Start), " ", toupper(Best_Dir), if_else(Best_Snake, " (Snake)", " (Typewriter)")))
+      )
+    
+    # 3. Exact Coordinate Path Math
+    path_list <- list()
+    for(i in 1:nrow(map_df)) {
+      r <- map_df[i, ]
+      p <- r$Plot; sp <- r$Best_Start; dir <- r$Best_Dir; snk <- r$Best_Snake
+      
+      start_x <- if(str_detect(sp, "right") || sp == "reversed") r$max_P else r$min_P
+      end_x   <- if(str_detect(sp, "right") || sp == "reversed") r$min_P else r$max_P
+      start_y <- if(str_detect(sp, "bottom")) r$max_R else r$min_R
+      end_y   <- if(str_detect(sp, "bottom")) r$min_R else r$max_R
+      
+      step_x <- if(start_x <= end_x) 1 else -1
+      step_y <- if(start_y <= end_y) 1 else -1
+      
+      lines_to_draw <- if(dir == "horizontal") min(3, r$max_R - r$min_R + 1) else min(3, r$max_P - r$min_P + 1)
+      if (r$max_R == r$min_R) lines_to_draw <- 1 
+      
+      vx <- numeric()
+      vy <- numeric()
+      
+      for (k in 1:lines_to_draw) {
+        if (dir == "horizontal") {
+          cur_y <- start_y + (k - 1) * step_y
+          if (snk && k %% 2 == 0) {
+            vx <- c(vx, end_x, start_x); vy <- c(vy, cur_y, cur_y)
+          } else {
+            vx <- c(vx, start_x, end_x); vy <- c(vy, cur_y, cur_y)
+          }
+        } else { 
+          cur_x <- start_x + (k - 1) * step_x
+          if (snk && k %% 2 == 0) {
+            vx <- c(vx, cur_x, cur_x); vy <- c(vy, end_y, start_y)
+          } else {
+            vx <- c(vx, cur_x, cur_x); vy <- c(vy, start_y, end_y)
+          }
+        }
+        if (!snk && k < lines_to_draw) {
+          vx <- c(vx, NA); vy <- c(vy, NA)
+        }
+      }
+      path_list[[i]] <- tibble(Plot = p, X = vx, Y = vy, Path_Type = r$Path_Type)
+    }
+    path_df <- bind_rows(path_list)
+    
+    if(nrow(map_df) > 0) {
+      unique_paths <- sort(unique(map_df$Path_Type))
+      my_colors <- setNames(scales::hue_pal()(length(unique_paths)), unique_paths)
+      if("Target (Normal)" %in% names(my_colors)) my_colors["Target (Normal)"] <- "#bdc3c7"
+      
+      p_map <- ggplot() +
+        # Trees (Smaller dots)
+        geom_point(data = plot_spatial_trees, aes(x = Map_Pos, y = Map_Row), color = "grey75", size = 0.6) +
+        # Plot Borders
+        geom_rect(data = map_df, aes(xmin = min_P - 0.5, xmax = max_P + 0.5, ymin = min_R - 0.5, ymax = max_R + 0.5, color = Path_Type), 
+                  fill = NA, linewidth = 0.6) +
+        # Plot IDs
+        geom_text(data = map_df, aes(x = Centroid_Pos, y = Centroid_Row, label = Plot), 
+                  size = 4, color = "black", fontface = "bold") +
+        # The Arrows (Thicker lines, larger heads)
+        geom_path(data = path_df, aes(x = X, y = Y, color = Path_Type, group = Plot), 
+                  arrow = arrow(length = unit(0.08, "inches"), type = "closed"), linewidth = 0.6) +
+        
+        scale_y_reverse() + 
+        scale_color_manual(values = my_colors) +
+        theme_minimal() +
+        labs(
+          title = paste("Field Traversal Map:", TEST_TRAIT, "anchored to", BASELINE_TRAIT),
+          x = "Field Position (X)", y = "Field Row (Y)"
+        ) +
+        theme(legend.position = "none", # Legend dropped
+              panel.grid.major = element_line(color = "grey95"),
+              panel.grid.minor = element_blank(),
+              plot.title = element_text(face = "bold", size = 16))
+      
+      ggsave(file.path(DIAG_DIR, paste0(BASELINE_TRAIT, "_vs_", TEST_TRAIT, out_suffix, "_Spatial_Map.png")), plot = p_map, width = 16, height = 10, dpi = 300)
+    }
+  } else {
+    message("  -> Skipping spatial map: Spatial coordinates missing from raw data.")
+  }
+  
   # --- Forensic Report ---
   target_desc <- "TOP-LEFT start, HORIZONTAL rows, TYPEWRITER (no snake)"
   dominant_fix <- recommendations %>% filter(str_detect(Action_Required, "FIX")) %>% count(Best_Start, Best_Dir, Best_Snake) %>% arrange(desc(n)) %>% slice(1)

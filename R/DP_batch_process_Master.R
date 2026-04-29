@@ -843,6 +843,48 @@ for (curr_exp in experiments_to_process) {
     stats_df <- final_long_dedup %>% filter(Reject_Flag == 0) %>% group_by(Trait) %>% summarise(N_Valid = sum(!is.na(Value_Num)), Mean = mean(Value_Num, na.rm=TRUE), Std_Dev = sd(Value_Num, na.rm=TRUE), Min = min(Value_Num, na.rm=TRUE), Max = max(Value_Num, na.rm=TRUE), CV_Pct = (sd(Value_Num, na.rm=TRUE)/mean(Value_Num, na.rm=TRUE))*100) %>% mutate(across(where(is.numeric), ~ round(., 2)))
     write_csv(stats_df, file.path(exp_path, paste0(curr_exp, "_Stats", out_suffix, ".csv")), na = "")
     
+    # --- Trait-Trait Correlations Table ---
+    message("  -> Generating Trait-Trait Correlation Table...")
+    
+    # 1. Identify continuous traits 
+    cont_traits_for_cor <- names(wide_data)[sapply(wide_data, is.numeric)]
+    cont_traits_for_cor <- setdiff(cont_traits_for_cor, c("Tree", "InferredTreePosition", "Validation_Flag"))
+    
+    if (length(cont_traits_for_cor) >= 2) {
+      cor_data <- wide_data %>% select(all_of(cont_traits_for_cor))
+      
+      # 2. Filter 0s for physical traits (Heights/Diameters) to match PDF logic
+      for (trt in names(cor_data)) {
+        if (!str_detect(trt, "(?i)^(Pil|Br|St|Sur|Fr)")) {
+          cor_data[[trt]] <- na_if(cor_data[[trt]], 0)
+        }
+      }
+      
+      # 3. Calculate correlations and N-obs
+      cor_matrix <- cor(cor_data, use = "pairwise.complete.obs", method = "spearman")
+      n_matrix <- crossprod(!is.na(cor_data))
+      
+      # 4. Melt into a tidy table
+      cor_table <- as.data.frame(as.table(cor_matrix)) %>%
+        rename(Trait_1 = Var1, Trait_2 = Var2, Spearman_Rho = Freq) %>%
+        filter(as.character(Trait_1) < as.character(Trait_2)) %>% # Keep upper triangle only
+        filter(!is.na(Spearman_Rho)) %>%
+        mutate(Spearman_Rho = round(Spearman_Rho, 3))
+      
+      n_table <- as.data.frame(as.table(n_matrix)) %>%
+        rename(Trait_1 = Var1, Trait_2 = Var2, N_Obs = Freq)
+      
+      cor_table <- cor_table %>%
+        left_join(n_table, by = c("Trait_1", "Trait_2")) %>%
+        arrange(desc(Spearman_Rho))
+      
+      # 5. Export
+      write_csv(cor_table, file.path(TRIAL_DIR, paste0(trial_name, "_Trait_Correlations", output_suffix, ".csv")))
+      
+    } else {
+      message("  -> Skipping correlation table: Not enough continuous traits.")
+    }
+    
     # --- 9. XML Generation ---
     xml_data <- data_with_outliers %>% group_by(Trait) %>% mutate(Calc_Vals = if_else(Value_Num > 0, Value_Num, NA_real_), Min_Val = min(Calc_Vals, na.rm = TRUE), Max_Val = max(Calc_Vals, na.rm = TRUE), Trait_Date = if(length(Date[!is.na(Date)]) > 0) as.character(Date[!is.na(Date)][1]) else NA_character_) %>% ungroup() %>% distinct(Trait, Trait_Orig, Prefix, Age, UnitCode, Is_Ordinal, Min_Val, Max_Val, Trait_Date) %>% left_join(trait_map, by = c("Prefix" = "trait_code_FR")) %>%
       mutate(Group = case_when(!is.na(xml_group) & xml_group != "" ~ xml_group, str_detect(Prefix, "(?i)SUR") ~ "Health", TRUE ~ "Uncategorized"), Desc_Base = coalesce(xml_desc_base, Prefix), Real_Units = case_when(!is.na(xml_units) & xml_units != "none" & xml_units != "" ~ xml_units, Is_Ordinal & is.finite(Min_Val) ~ paste0("$", Min_Val, "-", Max_Val), str_detect(Trait, "(?i)Sur") ~ "0/$1", str_detect(Trait, "(?i)Pil") ~ "mm", str_detect(Trait, "(?i)Av") ~ "m/s", !is.na(UnitCode) & UnitCode != "" ~ str_to_lower(UnitCode), TRUE ~ "unitless"), Full_Description = paste0(Desc_Base, " Age ", Age, " (was ", Trait_Orig, ")", if_else(!is.na(Trait_Date), paste(" Date:", Trait_Date), "")), XML_Tag = sprintf('<trait group_name="%s" name="%s" trait_type="M" description="%s" data_type="N" is_solver_mappable="1" summary_rule="first_with_reject" units="%s" validate="none" />', Group, Trait, Full_Description, Real_Units)) %>% arrange(Trait)
