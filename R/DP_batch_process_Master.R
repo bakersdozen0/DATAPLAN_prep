@@ -8,12 +8,10 @@ library(grid)
 library(here)
 library(janitor)
 
-
-
 # =====================================================================
 # MASTER DATAPLAN PIPELINE CONFIGURATION
 # =====================================================================
-PLOT_TYPE     <- "SINGLE" # Options: "SINGLE" or "MULTI"
+PLOT_TYPE     <- "MULTI" # Options: "SINGLE" or "MULTI"
 # 1. Define the main species folder (Where the Traits Excel file lives)
 BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka"
 
@@ -26,7 +24,7 @@ BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritish
 
 
 # 2. Define the specific subfolder containing the trials you want to process today
-TRIAL_SERIES  <- "Backwards Selected Fullsib P96-P99 experiments" 
+TRIAL_SERIES  <- "High GCA Fullsib P85-P87 experiments" 
 ### e.g.: "High GCA Fullsib P85-P87 experiments" / "Backwards Selected Fullsib P96-P99 experiments" / "Trials" (For SP)
 # (e.g., switch this to "Backwards Selected Fullsib P96-P99 experiments" when needed)
 
@@ -150,6 +148,60 @@ parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
   
   clean_design <- clean_design %>% select(Plot, Block, SubBlock, Family_name)
   return(clean_design)
+}
+
+# --- 1c. Parse CEDD ASCII File (txt) ---
+parse_cedd_raw_txt <- function(filepath, trait_name, trait_prefix_raw, txt_age) {
+  
+  # 1. Read the entire file
+  raw_text <- readChar(filepath, file.info(filepath)$size)
+  
+  # 2. Extract Data Blocks
+  block_pattern <- "(?m)^\\s*(\\d+):\\s*(.*?)\\s*\\$"
+  matches <- str_match_all(raw_text, block_pattern)[[1]]
+  
+  if (nrow(matches) == 0) return(tibble())
+  
+  # 3. UNIT EXTRACTION LOGIC
+  # Read just the first 10 lines to hunt for the CEDD header code (e.g., HTCM03)
+  head_lines <- readLines(filepath, n = 10, warn = FALSE)
+  header_block <- paste(head_lines, collapse = " ")
+  
+  # Build a dynamic regex: Look for the Prefix, capture the middle letters, ending with Age
+  unit_regex <- paste0("(?i)\\b", trait_prefix_raw, "([A-Za-z]+)", txt_age, "\\b")
+  extracted_unit <- str_match(header_block, unit_regex)[, 2]
+  
+  # Clean up the unit (default to "" if nothing is found)
+  final_unit <- if (!is.na(extracted_unit)) str_to_lower(extracted_unit) else ""
+  
+  # 4. Process each block
+  plot_data_list <- list()
+  for (i in 1:nrow(matches)) {
+    plot_id <- as.character(matches[i, 2])
+    raw_values_str <- matches[i, 3]
+    
+    clean_str <- str_squish(str_replace_all(raw_values_str, "[\\r\\n\\t]+", " "))
+    val_tokens <- str_split(clean_str, " ")[[1]]
+    val_tokens <- val_tokens[val_tokens != ""] 
+    
+    if (length(val_tokens) > 0) {
+      plot_df <- tibble(
+        Plot = plot_id,
+        Tree = 1:length(val_tokens), 
+        Raw_Val = val_tokens
+      ) %>%
+        mutate(
+          Final_Val = if_else(Raw_Val == "M", NA_real_, suppressWarnings(as.numeric(Raw_Val))),
+          Extracted_Unit = final_unit # Attach the unit we found!
+        ) %>%
+        select(Plot, Tree, Extracted_Unit, !!sym(trait_name) := Final_Val)
+      
+      plot_data_list[[i]] <- plot_df
+    }
+  }
+  
+  parsed_df <- bind_rows(plot_data_list)
+  return(parsed_df)
 }
 
 # --- 2. PDF Reporting Function ---
@@ -372,11 +424,12 @@ map_interior_trees <- function(tree_idx, subset_size, full_size) {
 }
 
 # --- 5. Traversal/ Data orientation correction ---
-get_grid_layout <- function(plot_size, interior_only = FALSE) {
-  if (plot_size <= 8) return(matrix(1:8, nrow=1))
-  n <- as.integer(sqrt(plot_size))
-  mat <- matrix(1:(n*n), nrow=n, byrow=TRUE)
-  if(interior_only && n >= 3) mat <- mat[2:(n-1), 2:(n-1)]
+get_grid_layout <- function(n_rows, n_cols, interior_only = FALSE) {
+  if (n_rows == 1 && n_cols == 8) return(matrix(1:8, nrow=1))
+  if (n_rows == 8 && n_cols == 1) return(matrix(1:8, ncol=1))
+  
+  mat <- matrix(1:(n_rows*n_cols), nrow=n_rows, byrow=TRUE)
+  if(interior_only && n_rows >= 3 && n_cols >= 3) mat <- mat[2:(n_rows-1), 2:(n_cols-1)]
   return(mat)
 }
 
@@ -425,7 +478,7 @@ experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", "
 message(paste("Found", length(experiments_to_process), "folders to check."))
 
 # NOTE: Uncomment and set this to run specific folders for testing!
-experiments_to_process <- c("Kielder 162")
+  experiments_to_process <- c("Craigellachie 49")
 
 # # # # # # # # # # # # # # # # # # # # # # # 
 # PART 2: MAIN PROCESSING LOOP ####
@@ -613,6 +666,9 @@ for (curr_exp in experiments_to_process) {
       }
     }
     
+    # FIX: Strip out PowerBI footers and blank rows BEFORE checking for duplicates!
+    raw_data <- raw_data %>% filter(!is.na(Plot), !is.na(Measurement))
+    
     # Duplicate Checks
     duplicate_check <- raw_data %>% group_by(Plot, InferredTreePosition, Assessment, `Assessment Year`) %>% mutate(Measure_Count = n()) %>% ungroup()
     if (any(duplicate_check$Measure_Count > 1)) {
@@ -696,6 +752,52 @@ for (curr_exp in experiments_to_process) {
     
     exp_data_long <- exp_data_long %>% mutate(Trait = str_to_title(Trait))
     
+    # --------------------------------------------------------------------------
+    # NEW: Raw ASCII Text Recovery (.txt files)
+    # --------------------------------------------------------------------------
+    txt_files <- dir_ls(exp_path, regexp = "(?i)/[A-Za-z]+_\\d+\\.txt$")
+      if (length(txt_files) > 0) {
+      for (txt_path in txt_files) {
+        filename <- tools::file_path_sans_ext(basename(txt_path))
+        
+        trait_prefix_raw <- str_extract(filename, "^[A-Za-z]+")
+        txt_age <- str_extract(filename, "\\d+$")
+        txt_age <- str_pad(txt_age, width = 2, pad = "0")
+        
+        clean_prefix <- str_to_upper(trait_prefix_raw)
+        match <- trait_map %>% mutate(m = str_to_upper(trait_code_FR)) %>% filter(clean_prefix == m) %>% slice(1)
+        if(nrow(match) == 0) match <- trait_map %>% mutate(m = str_to_upper(trait_code_FR)) %>% filter(str_starts(clean_prefix, m)) %>% slice(1)
+        
+        trait_dp <- if(nrow(match) > 0) match$trait_code_DP else str_to_title(trait_prefix_raw)
+        final_trait_name <- paste0(trait_dp, "_", txt_age)
+        
+        message(paste("  -> Recovering ASCII Data:", basename(txt_path), "as", final_trait_name))
+        
+        # Parse the multi-line text file (Now passes prefix and age to hunt for units!)
+        txt_df <- parse_cedd_raw_txt(txt_path, final_trait_name, trait_prefix_raw, txt_age)
+        
+        if (nrow(txt_df) > 0) {
+          # Convert to standard long format
+          txt_long <- txt_df %>%
+            pivot_longer(cols = c(-Plot, -Tree, -Extracted_Unit), names_to = "Trait", values_to = "Value_Num") %>%
+            filter(!is.na(Value_Num)) %>%
+            mutate(
+              Plot = as.character(Plot),
+              Tree = as.numeric(Tree),
+              Value_Char = as.character(Value_Num),
+              Age = txt_age,
+              Prefix = trait_prefix_raw,
+              Trait_Orig = final_trait_name,
+              UnitCode = Extracted_Unit, # USE THE UNIT WE FOUND IN THE HEADER!
+              Date = as.Date(NA)
+            ) %>%
+            select(any_of(names(exp_data_long)))
+          
+          exp_data_long <- bind_rows(exp_data_long, txt_long)
+        }
+      }
+    }
+    
     # =====================================================================
     # 5. ASSESSOR BEHAVIORAL DIAGNOSTIC & CORRECTIONS
     # =====================================================================
@@ -721,17 +823,24 @@ for (curr_exp in experiments_to_process) {
             next
           }
           
-          # Auto-detect frame size
-          plot_all_trees <- exp_data_long %>% filter(Plot == rule$Plot, !is.na(Tree)) %>% pull(Tree) %>% as.numeric()
-          plot_size <- max(plot_all_trees, na.rm = TRUE)
-          if (plot_size <= 8) plot_size <- 8 else if (plot_size <= 25) plot_size <- 25 else if (plot_size <= 49) plot_size <- 49 else plot_size <- max(plot_all_trees)
+          # --- DYNAMIC GRID RESIZING FOR THE MAIN PIPELINE ---
+          p_rows <- 10; p_cols <- 10 # Fallback sizes
+          if (!is.null(spatial_info)) {
+            sp_data <- spatial_info %>% filter(Plot == rule$Plot)
+            if(nrow(sp_data) > 0) {
+              p_rows <- max(sp_data$Prow, na.rm=TRUE) - min(sp_data$Prow, na.rm=TRUE) + 1
+              p_cols <- max(sp_data$Ppos, na.rm=TRUE) - min(sp_data$Ppos, na.rm=TRUE) + 1
+            }
+          }
           
-          # Auto-detect interior status
+          # Auto-detect interior status using the new grid math
           trait_trees <- unique(target_data$Tree) %>% as.numeric()
-          layout_interior <- as.vector(get_grid_layout(plot_size, interior_only = TRUE))
-          is_trait_interior <- (plot_size > 8 && length(trait_trees) > 0 && all(trait_trees %in% layout_interior))
+          layout_interior <- as.vector(get_grid_layout(p_rows, p_cols, interior_only = TRUE))
           
-          layout_mat <- get_grid_layout(plot_size, interior_only = is_trait_interior)
+          # If it's a small plot (like 8x1), interior logic doesn't apply
+          is_trait_interior <- (length(layout_interior) > 0 && length(trait_trees) > 0 && all(trait_trees %in% layout_interior))
+          
+          layout_mat <- get_grid_layout(p_rows, p_cols, interior_only = is_trait_interior)
           canonical_path <- get_traversal_path(layout_mat, "top_left", "horizontal", FALSE)
           tested_path <- get_traversal_path(layout_mat, rule$Best_Start, rule$Best_Dir, as.logical(rule$Best_Snake))
           
@@ -751,6 +860,7 @@ for (curr_exp in experiments_to_process) {
             Mirror_Flag = sprintf("ID Realigned from %s %s%s", toupper(rule$Best_Start), toupper(rule$Best_Dir), anchor_text)
           ))
         }
+        
         message(paste("   -> Applied", nrow(traversal_helper), "plot-specific traversal corrections."))
       } else {
         message("   -> No TRAVERSAL_HELPER found. Using standard orientation.")
