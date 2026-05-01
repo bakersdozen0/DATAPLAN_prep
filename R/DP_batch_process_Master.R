@@ -13,7 +13,7 @@ library(janitor)
 # =====================================================================
 # MASTER DATAPLAN PIPELINE CONFIGURATION
 # =====================================================================
-PLOT_TYPE     <- "MULTI" # Options: "SINGLE" or "MULTI"
+PLOT_TYPE     <- "SINGLE" # Options: "SINGLE" or "MULTI"
 # 1. Define the main species folder (Where the Traits Excel file lives)
 BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka"
 
@@ -26,7 +26,7 @@ BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritish
 
 
 # 2. Define the specific subfolder containing the trials you want to process today
-TRIAL_SERIES  <- "High GCA Fullsib P85-P87 experiments" 
+TRIAL_SERIES  <- "Backwards Selected Fullsib P96-P99 experiments" 
 ### e.g.: "High GCA Fullsib P85-P87 experiments" / "Backwards Selected Fullsib P96-P99 experiments" / "Trials" (For SP)
 # (e.g., switch this to "Backwards Selected Fullsib P96-P99 experiments" when needed)
 
@@ -312,7 +312,7 @@ generate_pdf_report <- function(long_data, wide_data, exp_name, multi_age_prefix
       cor_val <- round(cor(plot_df$X_Val, plot_df$Y_Val, method = "spearman"), 3)
       
       p_corr <- ggplot(plot_df, aes(x=X_Val, y=Y_Val)) + 
-        geom_smooth(method = "lm", se = FALSE, color = "gray", linetype = "dashed", alpha=0.5) +
+        geom_smooth(method = "lm",formula = y ~ x, se = FALSE, color = "gray", linetype = "dashed", alpha=0.5) +
         geom_point(aes(color = Status), alpha = 0.6) + 
         scale_color_manual(values = c("Normal" = "black", "Outlier" = "orange")) +
         labs(
@@ -328,7 +328,7 @@ generate_pdf_report <- function(long_data, wide_data, exp_name, multi_age_prefix
   
   # Heatmaps
   if (all(c("Prow", "Ppos") %in% names(wide_data))) {
-    heatmap_traits <- c(cont_traits, ord_traits)
+    heatmap_traits <- c(cont_traits, ord_traits, pil_traits)
     for (trait in heatmap_traits) {
       if (!trait %in% names(wide_data)) next
       map_data <- wide_data %>% select(Prow, Ppos, Value = all_of(trait)) %>% mutate(Prow = as.numeric(Prow), Ppos = as.numeric(Ppos)) %>% filter(!is.na(Value), !is.na(Prow), !is.na(Ppos))
@@ -425,11 +425,14 @@ experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", "
 message(paste("Found", length(experiments_to_process), "folders to check."))
 
 # NOTE: Uncomment and set this to run specific folders for testing!
-experiments_to_process <- c("Ae 60")
+experiments_to_process <- c("Kielder 162")
 
 # # # # # # # # # # # # # # # # # # # # # # # 
 # PART 2: MAIN PROCESSING LOOP ####
 # # # # # # # # # # # # # # # # # # # # # # # 
+
+# Initialize a list to hold correlations for the master summary
+master_correlations_list <- list()
 
 for (curr_exp in experiments_to_process) {
   
@@ -846,12 +849,14 @@ for (curr_exp in experiments_to_process) {
     # --- Trait-Trait Correlations Table ---
     message("  -> Generating Trait-Trait Correlation Table...")
     
-    # 1. Identify continuous traits 
-    cont_traits_for_cor <- names(wide_data)[sapply(wide_data, is.numeric)]
-    cont_traits_for_cor <- setdiff(cont_traits_for_cor, c("Tree", "InferredTreePosition", "Validation_Flag"))
+    # 1. Pull the numeric dataset and strictly filter for continuous biological traits
+    # BULLETPROOF: Drops all known IDs/Coords, then forces everything else to be strictly numeric
+    cor_data <- exp_data_wide_numeric %>% 
+      select(-any_of(c("Plot", "Tree", "InferredTreePosition", "Row", "Position", "Prow", "Ppos", "Block", "SubBlock", "Validation_record"))) %>%
+      select(-matches("(?i)^Sur_")) %>%
+      select(where(is.numeric)) 
     
-    if (length(cont_traits_for_cor) >= 2) {
-      cor_data <- wide_data %>% select(all_of(cont_traits_for_cor))
+    if (ncol(cor_data) >= 2) {
       
       # 2. Filter 0s for physical traits (Heights/Diameters) to match PDF logic
       for (trt in names(cor_data)) {
@@ -878,8 +883,11 @@ for (curr_exp in experiments_to_process) {
         left_join(n_table, by = c("Trait_1", "Trait_2")) %>%
         arrange(desc(Spearman_Rho))
       
-      # 5. Export
-      write_csv(cor_table, file.path(TRIAL_DIR, paste0(trial_name, "_Trait_Correlations", output_suffix, ".csv")))
+      # 5. Export Individual Trial Table
+      write_csv(cor_table, file.path(exp_path, paste0(curr_exp, "_Trait_Correlations", out_suffix, ".csv")))
+      
+      # 6. Add to our Master List for the global summary
+      master_correlations_list[[curr_exp]] <- cor_table %>% mutate(Trial = curr_exp)
       
     } else {
       message("  -> Skipping correlation table: Not enough continuous traits.")
@@ -895,3 +903,27 @@ for (curr_exp in experiments_to_process) {
     
   }, error = function(e) { message(paste("  -> ERROR processing", curr_exp, ": ", e$message)) })
 }
+
+# =====================================================================
+# 6. GLOBAL MULTI-TRIAL SYNTHESIS
+# =====================================================================
+message("\n==========================================")
+message("Generating Master Multi-Trial Correlation Table...")
+
+if (length(master_correlations_list) > 0) {
+  # Combine all trials into one massive table (No summary math!)
+  master_cor_df <- bind_rows(master_correlations_list) %>%
+    # Reorder columns so Trial is the first thing you see
+    select(Trial, Trait_1, Trait_2, Spearman_Rho, N_Obs) %>%
+    # Sort alphabetically by Trial, then by highest correlation
+    arrange(Trial, desc(Spearman_Rho))
+  
+  # Save to the root folder (e.g., "Sitka/High GCA Fullsib P85-P87 experiments")
+  summary_path <- file.path(ROOT_DATA_DIR, paste0("MASTER_Trait_Correlations_", format(Sys.Date(), "%Y%m%d"), ".csv"))
+  write_csv(master_cor_df, summary_path)
+  
+  message(paste("  -> Master correlation table saved to:", summary_path))
+} else {
+  message("  -> No correlation data found across any trials to compile.")
+}
+message("==========================================\n")

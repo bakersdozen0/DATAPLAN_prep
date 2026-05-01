@@ -1,6 +1,6 @@
 
 
-data_dir<-"//forestresearch.gov.uk/shares/CSFCC/Forest Resource and Product Assessment and Improvement/NRS-Tree Improvement/CONIFERS/SITKA SPRUCE/psi_DATAPLAN_prep"
+data_dir<-"C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka"
 
 library(tidyverse)
 library(readxl)
@@ -12,37 +12,67 @@ library(stringr)
 
 
 ## Summarize ASCII files: ####
-data_dir <- "//forestresearch.gov.uk/shares/CSFCC/Forest Resource and Product Assessment and Improvement/NRS-Tree Improvement/CONIFERS/SITKA SPRUCE/psi_DATAPLAN_prep/second powerbi download/"
-
-file_list <- dir_ls(data_dir, recurse = TRUE, regexp = "ASCII\\.xlsx$")
+# 1. Broaden the regex to capture both .xlsx and .csv ASCII files
+file_list <- dir_ls(data_dir, recurse = TRUE, regexp = "(?i)ASCII\\.(xlsx|csv)$")
+message("Found ", length(file_list), " ASCII files to summarize.")
 
 trial_analysis <- file_list %>%
   map_df(function(file) {
     
-    # 1. Load data
-    df <- read_xlsx(file) %>% clean_names()
+    # 2. Dynamically load the data based on file extension
+    if (str_detect(file, "(?i)\\.csv$")) {
+      df <- read_csv(file, col_types = cols(.default = "c")) %>% clean_names()
+    } else {
+      df <- read_xlsx(file, col_types = "text") %>% clean_names()
+    }
     
-    # 2. Identify required columns
-    # We assume 'value' or similar holds the measurement. 
-    # If the measurement is in a column named after the assessment, 
-    # we need to pivot the data first.
+    # --- 3. DYNAMIC COLUMN RENAMING (Copied from Master Pipeline) ---
     
-    required <- c("assessment", "assessment_year", "plot", "inferred_tree_position")
+    # Assessment Trait
+    assess_col <- intersect(c("assessment", "assessment_type_long", "assessment_type"), names(df))[1]
+    if (!is.na(assess_col)) df <- df %>% rename(assessment = !!sym(assess_col))
     
-    if (!all(required %in% names(df))) return(NULL)
+    # Assessment Year
+    year_col <- intersect(c("assessment_year", "assessment_year_long", "age"), names(df))[1]
+    if (!is.na(year_col)) df <- df %>% rename(assessment_year = !!sym(year_col))
+    
+    # Plot
+    if("plot" %in% names(df)) df <- df %>% rename(plot = plot)
+    
+    # ----------------------------------------------------------------
+    
+    # Check for the absolute bare minimum columns required for a summary
+    required_base <- c("assessment", "assessment_year", "plot")
+    if (!all(required_base %in% names(df))) {
+      message("Skipping ", basename(file), " - missing core columns (assessment, year, plot)")
+      return(NULL)
+    }
+    
+    # --- 4. DYNAMIC TREE POSITION HANDLING ---
+    if ("inferred_tree_position" %in% names(df)) {
+      # Standard Modern Trial: Use existing column
+      df <- df %>% rename(tree_pos = inferred_tree_position)
+    } else {
+      # Fallback for 90s Single-Tree OR Scots Pine Multi-Tree without IDs
+      # We group by Plot + Trait + Year and just count the rows!
+      df <- df %>% 
+        group_by(assessment, assessment_year, plot) %>% 
+        mutate(tree_pos = row_number()) %>% 
+        ungroup()
+    }
     
     df %>%
-      # 3. Filter for valid entries (remove rows where the tree position is missing)
-      filter(!is.na(inferred_tree_position)) %>%
+      # 5. Filter for valid entries
+      filter(!is.na(tree_pos)) %>%
       
-      # 4. Count unique stems per Plot for every Trait + Year combo
+      # 6. Count unique stems per Plot for every Trait + Year combo
       group_by(assessment, assessment_year, plot) %>%
       summarise(
-        stems_measured = n_distinct(inferred_tree_position), 
+        stems_measured = n_distinct(tree_pos), 
         .groups = "drop"
       ) %>%
       
-      # 5. Calculate the Average Stems per Plot across the whole Experiment/File
+      # 7. Calculate the Average Stems per Plot across the whole Experiment/File
       group_by(assessment, assessment_year) %>%
       summarise(
         avg_stems_per_plot = mean(stems_measured, na.rm = TRUE),
@@ -52,17 +82,18 @@ trial_analysis <- file_list %>%
         .groups = "drop"
       ) %>%
       
-      # 6. Label with the filename (Experiment ID)
+      # 8. Label with the filename (Experiment ID)
       mutate(experiment_file = basename(file))
   })
 
-# 7. Final Output Organization
+# 9. Final Output Organization
 final_report <- trial_analysis %>%
-  select(experiment_file, assessment, assessment_year, avg_stems_per_plot, total_plots_count) %>%
+  select(experiment_file, assessment, assessment_year, avg_stems_per_plot, min_stems_in_a_plot, max_stems_in_a_plot, total_plots_count) %>%
   arrange(experiment_file, assessment_year)
 
 print(final_report, n = 100)
-write.csv(final_report, file.path(data_dir,"ASCII_initial_report.csv"))
+write_csv(final_report, file.path(data_dir, "MASTER_ASCII_Inventory_Report.csv"))
+message("Report saved successfully!")
 
 ## 2: Count instances where AV was measured more than once per stem (see ASCII remarks; some instances of 
 ## instances where it was taken on both NE and SW side)
@@ -72,8 +103,7 @@ library(readxl)
 library(fs)
 
 # Define paths
-data_dir <- "//forestresearch.gov.uk/shares/CSFCC/Forest Resource and Product Assessment and Improvement/NRS-Tree Improvement/CONIFERS/SITKA SPRUCE/psi_DATAPLAN_prep"
-root_path <- file.path(data_dir, "High GCA Fullsib P85-P87 experiments")
+root_path <- file.path(data_dir, "Backwards Selected Fullsib P96-P99 experiments")
 
 # Find all ASCII Excel files in the subfolders
 ascii_files <- dir_ls(root_path, recurse = TRUE, regexp = "(?i)_ASCII\\.xlsx$")
