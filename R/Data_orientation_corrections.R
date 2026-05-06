@@ -7,16 +7,16 @@ library(fs)
 # ============================================================================
 #### 1. USER CONFIGURATION ####
 # ============================================================================
-RAW_WIDE_DATA_CSV <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka/High GCA Fullsib P85-P87 experiments/Spadeadam 7/Spadeadam_7_Full_Data_With_Flags.csv"
+RAW_WIDE_DATA_CSV <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka/High GCA Fullsib P85-P87 experiments/Speyside 23/Speyside_23_Full_Data_With_Flags.csv"
 
 PLOT_TYPE      <- "MULTI"  # Options: "SINGLE" (evaluates Plot sequence within Blocks) or "MULTI" (Trees within Plots)
 
 # FALLBACK GRID DIMENSIONS (Used only if spatial Prow/Ppos are missing from the data)
-GRID_ROWS      <- 1
-GRID_COLS      <- 8
+GRID_ROWS      <- 8
+GRID_COLS      <- 1
 
-BASELINE_TRAIT <- "Dm_10" 
-TEST_TRAITS    <- c("Ht_03","Ht_06","Ht_10","Pil_15","Pil_27") 
+BASELINE_TRAIT <- "Dm_15" 
+TEST_TRAITS    <- c("Ht_03","Ht_10","Pil_15") 
 
 EXPECT_NEGATIVE_COR <- FALSE # <--- Set to TRUE if testing Pilodyn against growth traits!
 USE_CORRECTED_DATA  <- FALSE

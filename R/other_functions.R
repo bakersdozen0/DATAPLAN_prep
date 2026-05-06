@@ -697,37 +697,45 @@ df <- read_csv(target_csv, show_col_types = FALSE)
 
 # --- STORE "BEFORE" STATE FOR PLOTTING ---
 df_before <- df %>% 
-  select(Tree, Dm_09, Ht_05) %>% 
+  select(Plot, Tree, Dm_09, Ht_05) %>% 
   mutate(State = "1. Before Fix (Mirrored Error)")
 
-# 2. Isolate the exact columns that need to be flipped (including survival and flags)
+# 2. The critical fix: Use BOTH Plot and Tree as the unique identifiers!
+spatial_map <- df %>%
+  select(Plot, Tree, Prow, Ppos) %>%
+  filter(!is.na(Prow) & !is.na(Ppos)) %>%
+  distinct(Prow, Ppos, .keep_all = TRUE) 
+
+# 3. Isolate the exact columns that need to be flipped
 traits_to_flip <- intersect(names(df), c("Ht_05", "Sur_05", "Ht_05_reject"))
 
 flip_data <- df %>%
-  select(Tree, Prow, Ppos, all_of(traits_to_flip)) %>%
-  filter(!is.na(Prow) & !is.na(Ppos))
+  select(Plot, Tree, Prow, Ppos, all_of(traits_to_flip)) %>%
+  filter(!is.na(Prow) & !is.na(Ppos)) %>%
+  distinct(Plot, Tree, .keep_all = TRUE)
 
-# 3. The Spatial Math: Calculate the exact opposite X-coordinate for a global L-R flip
+# 4. The Spatial Math: Find target coordinates
 min_x <- min(flip_data$Ppos, na.rm = TRUE)
 max_x <- max(flip_data$Ppos, na.rm = TRUE)
 
-flip_data <- flip_data %>%
-  mutate(Mirrored_Ppos = max_x - Ppos + min_x)
+# Map the source data to the TARGET Plot/Tree at the mirrored destination
+flip_mapping <- flip_data %>%
+  mutate(Mirrored_Ppos = max_x - Ppos + min_x) %>%
+  left_join(spatial_map %>% select(Target_Plot = Plot, Target_Tree = Tree, Prow, Ppos), 
+            by = c("Prow" = "Prow", "Mirrored_Ppos" = "Ppos")) %>%
+  filter(!is.na(Target_Plot))
 
-# 4. Strip the broken traits out of the master dataframe
+# 5. Extract the data and assign it to the new Target Trees
+fixed_traits <- flip_mapping %>%
+  select(Plot = Target_Plot, Tree = Target_Tree, all_of(traits_to_flip)) %>%
+  distinct(Plot, Tree, .keep_all = TRUE)
+
+# 6. Merge the pristine data back together!
 df_clean <- df %>% select(-all_of(traits_to_flip))
 
-# 5. Map the values to their NEW physical locations based on the mirrored coordinates
-fixed_traits <- df %>% 
-  select(Tree, Prow, Ppos) %>% 
-  left_join(
-    flip_data %>% select(Prow, Mirrored_Ppos, all_of(traits_to_flip)), 
-    by = c("Prow" = "Prow", "Ppos" = "Mirrored_Ppos")
-  )
-
-# 6. Merge the pristine data back together and log the fix
 df_final <- df_clean %>%
-  left_join(fixed_traits %>% select(Tree, all_of(traits_to_flip)), by = "Tree") %>%
+  # Join securely using BOTH Plot and Tree
+  left_join(fixed_traits, by = c("Plot", "Tree")) %>% 
   mutate(
     Validation_record = case_when(
       is.na(Validation_record) ~ "Ht_05 Globally Mirrored L-R",
@@ -735,16 +743,15 @@ df_final <- df_clean %>%
     )
   )
 
-# 7. Save the fixed dataset!
+# 7. Save the fixed dataset
 out_path <- str_replace(target_csv, "(?i)\\.csv$", "_Corrected.csv")
 write_csv(df_final, out_path, na = "")
 
-message("Global Mirror applied! Saved to: ", basename(out_path))
+message("Global Mirror applied flawlessly! Saved to: ", basename(out_path))
 
 # 8. VERIFICATION PLOT
-# --- STORE "AFTER" STATE FOR PLOTTING ---
 df_after <- df_final %>% 
-  select(Tree, Dm_09, Ht_05) %>% 
+  select(Plot, Tree, Dm_09, Ht_05) %>% 
   mutate(State = "2. After Fix (Corrected)")
 
 plot_data <- bind_rows(df_before, df_after) %>%
@@ -766,5 +773,48 @@ p_verify <- ggplot(plot_data, aes(x = Dm_09, y = Ht_05)) +
     strip.text = element_text(face = "bold", size = 11)
   )
 
-# Display the plot in your RStudio Viewer
 print(p_verify)
+
+# 9. BEFORE & AFTER SPATIAL HEATMAP
+
+# 1. Extract the BEFORE spatial data directly from the raw 'df'
+spatial_before <- df %>% 
+  select(Prow, Ppos, Value = Ht_05) %>% 
+  mutate(State = "1. Before Fix (Mirrored Error)",
+         Prow = as.numeric(Prow), 
+         Ppos = as.numeric(Ppos)) %>%
+  filter(!is.na(Value), !is.na(Prow), !is.na(Ppos))
+
+# 2. Extract the AFTER spatial data directly from the corrected 'df_final'
+spatial_after <- df_final %>% 
+  select(Prow, Ppos, Value = Ht_05) %>% 
+  mutate(State = "2. After Fix (Corrected)",
+         Prow = as.numeric(Prow), 
+         Ppos = as.numeric(Ppos)) %>%
+  filter(!is.na(Value), !is.na(Prow), !is.na(Ppos))
+
+# 3. Combine them into a single dataframe for faceting
+heatmap_data <- bind_rows(spatial_before, spatial_after)
+
+# 4. Generate the side-by-side Spatial Map using your custom styling
+p_heatmap <- ggplot(heatmap_data, aes(x = Ppos, y = Prow, fill = Value)) + 
+  geom_tile(color = "white", size = 0.1) + 
+  scale_fill_distiller(palette = "Spectral", direction = -1, name = "Ht_05") + 
+  scale_y_reverse() + 
+  facet_wrap(~State) +
+  labs(
+    title = "Kielder 162: Ht_05 Spatial Heatmap Comparison",
+    subtitle = "Visually verifying the left-to-right mirror correction",
+    x = "Field Position (X)", 
+    y = "Field Row (Y)"
+  ) + 
+  theme_minimal() + 
+  coord_fixed() +
+  theme(
+    strip.background = element_rect(fill = "#ecf0f1"),
+    strip.text = element_text(face = "bold", size = 11),
+    legend.position = "right"
+  )
+
+# Display the heatmap in your RStudio Viewer
+print(p_heatmap)
