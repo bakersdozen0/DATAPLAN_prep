@@ -684,3 +684,87 @@ for (curr_exp in experiments_to_check) {
   
   message(paste("  -> SAVED:", dest_filename))
 }
+
+#### Correct Kielder 162 Ht_05 mirroring issue ####
+## This trait is fully mirrored over the plot: compare patterns of dead tress between Ht_05 and Dm_10. 
+library(tidyverse)
+
+# 1. Point this directly at Kielder 162
+target_csv <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka/Backwards Selected Fullsib P96-P99 experiments/Kielder 162/Kielder_162_Full_Data_With_Flags.csv"
+
+# Load the wide data
+df <- read_csv(target_csv, show_col_types = FALSE)
+
+# --- STORE "BEFORE" STATE FOR PLOTTING ---
+df_before <- df %>% 
+  select(Tree, Dm_09, Ht_05) %>% 
+  mutate(State = "1. Before Fix (Mirrored Error)")
+
+# 2. Isolate the exact columns that need to be flipped (including survival and flags)
+traits_to_flip <- intersect(names(df), c("Ht_05", "Sur_05", "Ht_05_reject"))
+
+flip_data <- df %>%
+  select(Tree, Prow, Ppos, all_of(traits_to_flip)) %>%
+  filter(!is.na(Prow) & !is.na(Ppos))
+
+# 3. The Spatial Math: Calculate the exact opposite X-coordinate for a global L-R flip
+min_x <- min(flip_data$Ppos, na.rm = TRUE)
+max_x <- max(flip_data$Ppos, na.rm = TRUE)
+
+flip_data <- flip_data %>%
+  mutate(Mirrored_Ppos = max_x - Ppos + min_x)
+
+# 4. Strip the broken traits out of the master dataframe
+df_clean <- df %>% select(-all_of(traits_to_flip))
+
+# 5. Map the values to their NEW physical locations based on the mirrored coordinates
+fixed_traits <- df %>% 
+  select(Tree, Prow, Ppos) %>% 
+  left_join(
+    flip_data %>% select(Prow, Mirrored_Ppos, all_of(traits_to_flip)), 
+    by = c("Prow" = "Prow", "Ppos" = "Mirrored_Ppos")
+  )
+
+# 6. Merge the pristine data back together and log the fix
+df_final <- df_clean %>%
+  left_join(fixed_traits %>% select(Tree, all_of(traits_to_flip)), by = "Tree") %>%
+  mutate(
+    Validation_record = case_when(
+      is.na(Validation_record) ~ "Ht_05 Globally Mirrored L-R",
+      TRUE ~ paste(Validation_record, "| Ht_05 Globally Mirrored L-R")
+    )
+  )
+
+# 7. Save the fixed dataset!
+out_path <- str_replace(target_csv, "(?i)\\.csv$", "_Corrected.csv")
+write_csv(df_final, out_path, na = "")
+
+message("Global Mirror applied! Saved to: ", basename(out_path))
+
+# 8. VERIFICATION PLOT
+# --- STORE "AFTER" STATE FOR PLOTTING ---
+df_after <- df_final %>% 
+  select(Tree, Dm_09, Ht_05) %>% 
+  mutate(State = "2. After Fix (Corrected)")
+
+plot_data <- bind_rows(df_before, df_after) %>%
+  filter(!is.na(Dm_09) & !is.na(Ht_05))
+
+p_verify <- ggplot(plot_data, aes(x = Dm_09, y = Ht_05)) +
+  geom_point(alpha = 0.5, size = 1, color = "#2c3e50") +
+  geom_smooth(method = "lm", formula = y ~ x, color = "#e74c3c", linetype = "dashed", se = FALSE) +
+  facet_wrap(~State) +
+  theme_bw() +
+  labs(
+    title = "Kielder 162: Ht_05 Global Spatial Correction",
+    subtitle = "Verifying the Left-to-Right Field Mirror Fix",
+    x = "Dm_09 (Trusted Baseline)",
+    y = "Ht_05"
+  ) +
+  theme(
+    strip.background = element_rect(fill = "#ecf0f1"),
+    strip.text = element_text(face = "bold", size = 11)
+  )
+
+# Display the plot in your RStudio Viewer
+print(p_verify)

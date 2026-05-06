@@ -49,8 +49,8 @@ parse_long_design_file <- function(filepath, exp_prefix, spp_code) {
   if(length(trt_start) == 0 || length(plot_start) == 0) return(NULL)
   
   # Dynamic regex based on Species Code
-  spp_regex <- paste0("^.*?=\\s*", spp_code, "\\s*(\\d+)\\s*", spp_code, "\\s*(.*)$")
-  control_regex <- paste0("^\\*.*?=\\s*", spp_code, "\\s*")
+  spp_regex <- paste0("^\\s*", spp_code, "\\s*(\\d+)\\s*", spp_code, "\\s*(.*)$")
+  control_regex <- paste0("^\\*?\\s*", spp_code, "\\s*")
   prefix_low <- tolower(spp_code)
   
   # Parse TREATMENTS
@@ -114,8 +114,8 @@ parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
   }
   
   # Dynamic regex based on Species Code
-  spp_regex <- paste0("^.*?=\\s*", spp_code, "\\s*(\\d+)\\s*", spp_code, "\\s*(.*)$")
-  control_regex <- paste0("^\\*.*?=\\s*", spp_code, "\\s*")
+  spp_regex <- paste0("^\\s*", spp_code, "\\s*(\\d+)\\s*", spp_code, "\\s*(.*)$")
+  control_regex <- paste0("^\\*?\\s*", spp_code, "\\s*")
   prefix_low <- tolower(spp_code)
   
   clean_design <- raw_design %>%
@@ -478,7 +478,7 @@ experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", "
 message(paste("Found", length(experiments_to_process), "folders to check."))
 
 # NOTE: Uncomment and set this to run specific folders for testing!
-  experiments_to_process <- c("Craigellachie 49")
+#  experiments_to_process <- c("Craigellachie 49")
 
 # # # # # # # # # # # # # # # # # # # # # # # 
 # PART 2: MAIN PROCESSING LOOP ####
