@@ -478,7 +478,7 @@ experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", "
 message(paste("Found", length(experiments_to_process), "folders to check."))
 
 # NOTE: Uncomment and set this to run specific folders for testing!
-  experiments_to_process <- c("Speyside 21")
+#  experiments_to_process <- c("Speyside 21")
 
 # # # # # # # # # # # # # # # # # # # # # # # 
 # PART 2: MAIN PROCESSING LOOP ####

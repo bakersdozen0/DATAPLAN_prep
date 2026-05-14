@@ -7,16 +7,16 @@ library(fs)
 # ============================================================================
 #### 1. USER CONFIGURATION ####
 # ============================================================================
-RAW_WIDE_DATA_CSV <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka/High GCA Fullsib P85-P87 experiments/Speyside 23/Speyside_23_Full_Data_With_Flags.csv"
+RAW_WIDE_DATA_CSV <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka/High GCA Fullsib P85-P87 experiments/Ae 58/Ae_58_Full_Data_With_Flags.csv"
 
 PLOT_TYPE      <- "MULTI"  # Options: "SINGLE" (evaluates Plot sequence within Blocks) or "MULTI" (Trees within Plots)
 
 # FALLBACK GRID DIMENSIONS (Used only if spatial Prow/Ppos are missing from the data)
-GRID_ROWS      <- 8
-GRID_COLS      <- 1
+GRID_ROWS      <- 7
+GRID_COLS      <- 7
 
-BASELINE_TRAIT <- "Dm_15" 
-TEST_TRAITS    <- c("Ht_03","Ht_10","Pil_15") 
+BASELINE_TRAIT <- "Ht_06" 
+TEST_TRAITS    <- c("Dm_15","Pil_17") 
 
 EXPECT_NEGATIVE_COR <- FALSE # <--- Set to TRUE if testing Pilodyn against growth traits!
 USE_CORRECTED_DATA  <- FALSE
@@ -179,7 +179,11 @@ for (TEST_TRAIT in TEST_TRAITS) {
       }
     }
     
-    layout_mat <- get_grid_layout(p_rows, p_cols)
+    trait_trees <- unique(p_data$Tree) %>% as.numeric()
+    layout_interior <- as.vector(get_grid_layout(p_rows, p_cols, interior_only = TRUE))
+    is_trait_interior <- (length(layout_interior) > 0 && length(trait_trees) > 0 && all(trait_trees %in% layout_interior))
+    
+    layout_mat <- get_grid_layout(p_rows, p_cols, interior_only = is_trait_interior)
     canonical_path <- get_traversal_path(layout_mat, "top_left", "horizontal", FALSE)
     
     for (i in 1:nrow(combos)) {
@@ -273,8 +277,13 @@ for (TEST_TRAIT in TEST_TRAITS) {
           sp_data <- plot_spatial_trees %>% filter(Plot == p)
           if(nrow(sp_data) > 0) { p_rows <- max(sp_data$Map_Row) - min(sp_data$Map_Row) + 1; p_cols <- max(sp_data$Map_Pos) - min(sp_data$Map_Pos) + 1 }
         }
-        layout_mat <- get_grid_layout(p_rows, p_cols)
+        trait_trees <- unique(p_data$Tree) %>% as.numeric()
+        layout_interior <- as.vector(get_grid_layout(p_rows, p_cols, interior_only = TRUE))
+        is_trait_interior <- (length(layout_interior) > 0 && length(trait_trees) > 0 && all(trait_trees %in% layout_interior))
+        
+        layout_mat <- get_grid_layout(p_rows, p_cols, interior_only = is_trait_interior)
         canonical_path <- get_traversal_path(layout_mat, "top_left", "horizontal", FALSE)
+        
         tested_path <- get_traversal_path(layout_mat, rec$start_corner, rec$direction, as.logical(rec$snake))
         
         translation_df <- tibble(Original_Tree = as.numeric(canonical_path), Mapped_Tree = as.numeric(tested_path))
@@ -299,7 +308,12 @@ for (TEST_TRAIT in TEST_TRAITS) {
         sp_data <- plot_spatial_trees %>% filter(Plot == p)
         if(nrow(sp_data) > 0) { p_rows <- max(sp_data$Map_Row) - min(sp_data$Map_Row) + 1; p_cols <- max(sp_data$Map_Pos) - min(sp_data$Map_Pos) + 1 }
       }
-      layout_mat <- get_grid_layout(p_rows, p_cols)
+       
+      trait_trees <- unique(p_data$Tree) %>% as.numeric()
+      layout_interior <- as.vector(get_grid_layout(p_rows, p_cols, interior_only = TRUE))
+      is_trait_interior <- (length(layout_interior) > 0 && length(trait_trees) > 0 && all(trait_trees %in% layout_interior))
+      
+      layout_mat <- get_grid_layout(p_rows, p_cols, interior_only = is_trait_interior)
       canonical_path <- get_traversal_path(layout_mat, "top_left", "horizontal", FALSE)
       
       tested_path <- get_traversal_path(layout_mat, rec$Best_Start, rec$Best_Dir, as.logical(rec$Best_Snake))
