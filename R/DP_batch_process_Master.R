@@ -115,23 +115,28 @@ parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
   
   # Dynamic regex based on Species Code
   spp_regex <- paste0("^\\s*", spp_code, "\\s*(\\d+)\\s*", spp_code, "\\s*(.*)$")
-  control_regex <- paste0("^\\*?\\s*", spp_code, "\\s*")
+  control_regex <- paste0("^\\s*", spp_code, "\\s*") # Simplified since the * is handled below
   prefix_low <- tolower(spp_code)
   
   clean_design <- raw_design %>%
     select(any_of(c("Plot", "Block", "Seedlot", "SubBlock"))) %>%
     filter(!is.na(Plot)) %>%
     mutate(Seedlot = if_else(str_trim(Seedlot) == "", NA_character_, Seedlot)) %>%
-    extract(Seedlot, into = c("Maternal_ID", "Paternal_ID"), regex = spp_regex, remove = FALSE) %>%
+  mutate(
+    Is_Control = str_detect(Seedlot, "^\\*"),
+    Clean_Seedlot = str_replace(Seedlot, "^.*?=\\s*", "") # Strips the "48=" or "*1=" prefix
+  ) %>%
+    extract(Clean_Seedlot, into = c("Maternal_ID", "Paternal_ID"), regex = spp_regex, remove = FALSE) %>%
     mutate(
       Plot = suppressWarnings(as.numeric(Plot)),
       Maternal_ID = str_trim(Maternal_ID),
       Paternal_ID = str_trim(Paternal_ID),
       Control_Name = if_else(
-        str_detect(Seedlot, "^\\*"),
-        str_trim(str_replace(Seedlot, control_regex, "")),
+        Is_Control,
+        str_trim(str_replace(Clean_Seedlot, control_regex, "")),
         NA_character_
       ),
+      # -------------------------
       Family_name = case_when(
         !is.na(Control_Name) ~ paste0(prefix_low, Control_Name),
         !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0(prefix_low, Maternal_ID, "_OPCB"),
