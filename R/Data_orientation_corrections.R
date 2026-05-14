@@ -7,18 +7,18 @@ library(fs)
 # ============================================================================
 #### 1. USER CONFIGURATION ####
 # ============================================================================
-RAW_WIDE_DATA_CSV <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka/High GCA Fullsib P85-P87 experiments/Ae 58/Ae_58_Full_Data_With_Flags.csv"
+RAW_WIDE_DATA_CSV <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka/High GCA Fullsib P85-P87 experiments/Craigellachie 49/Craigellachie_49_Full_Data_With_Flags.csv"
 
 PLOT_TYPE      <- "MULTI"  # Options: "SINGLE" (evaluates Plot sequence within Blocks) or "MULTI" (Trees within Plots)
 
 # FALLBACK GRID DIMENSIONS (Used only if spatial Prow/Ppos are missing from the data)
-GRID_ROWS      <- 7
-GRID_COLS      <- 7
+GRID_ROWS      <- 8
+GRID_COLS      <- 1
 
 BASELINE_TRAIT <- "Ht_06" 
-TEST_TRAITS    <- c("Dm_15","Pil_17") 
+TEST_TRAITS    <- c("Dm_10","Ht_10","Pil_15","Dm_15","Cr_07") 
 
-EXPECT_NEGATIVE_COR <- FALSE # <--- Set to TRUE if testing Pilodyn against growth traits!
+EXPECT_NEGATIVE_COR <- FALSE # <--- Set to TRUE if expecting negative correlations among traits!
 USE_CORRECTED_DATA  <- FALSE
 
 # --- Auto-Path Logic & Subdirectory Management ---
@@ -155,7 +155,7 @@ for (TEST_TRAIT in TEST_TRAITS) {
   
   working_data <- df_raw %>%
     select(Plot, Tree, Base_Val = !!sym(BASELINE_TRAIT), Base_Surv = !!sym(BASELINE_SURV), Test_Val = !!sym(TEST_TRAIT), Test_Surv = !!sym(TEST_SURV)) %>%
-    filter(!str_detect(Plot, "(?i)Filler")) %>%
+    #filter(!str_detect(Plot, "(?i)Filler")) %>%
     mutate(Tree = as.numeric(Tree), Plot = as.character(Plot), Base_Val = na_if(as.numeric(Base_Val), 0), Test_Val = na_if(as.numeric(Test_Val), 0))
   
   combos <- expand_grid(start_corner = c("top_left", "bottom_left", "top_right", "bottom_right"), direction = c("horizontal", "vertical"), snake = c(FALSE, TRUE)) %>% mutate(Perm_ID = row_number())
@@ -179,8 +179,10 @@ for (TEST_TRAIT in TEST_TRAITS) {
       }
     }
     
-    trait_trees <- unique(p_data$Tree) %>% as.numeric()
+    trait_trees <- plot_data %>% filter(!is.na(Test_Val)) %>% pull(Tree) %>% unique() %>% as.numeric()
+    
     layout_interior <- as.vector(get_grid_layout(p_rows, p_cols, interior_only = TRUE))
+    
     is_trait_interior <- (length(layout_interior) > 0 && length(trait_trees) > 0 && all(trait_trees %in% layout_interior))
     
     layout_mat <- get_grid_layout(p_rows, p_cols, interior_only = is_trait_interior)
@@ -277,8 +279,10 @@ for (TEST_TRAIT in TEST_TRAITS) {
           sp_data <- plot_spatial_trees %>% filter(Plot == p)
           if(nrow(sp_data) > 0) { p_rows <- max(sp_data$Map_Row) - min(sp_data$Map_Row) + 1; p_cols <- max(sp_data$Map_Pos) - min(sp_data$Map_Pos) + 1 }
         }
-        trait_trees <- unique(p_data$Tree) %>% as.numeric()
+        trait_trees <- p_data %>% filter(!is.na(Test_Val)) %>% pull(Tree) %>% unique() %>% as.numeric()
+        
         layout_interior <- as.vector(get_grid_layout(p_rows, p_cols, interior_only = TRUE))
+        
         is_trait_interior <- (length(layout_interior) > 0 && length(trait_trees) > 0 && all(trait_trees %in% layout_interior))
         
         layout_mat <- get_grid_layout(p_rows, p_cols, interior_only = is_trait_interior)
@@ -309,8 +313,10 @@ for (TEST_TRAIT in TEST_TRAITS) {
         if(nrow(sp_data) > 0) { p_rows <- max(sp_data$Map_Row) - min(sp_data$Map_Row) + 1; p_cols <- max(sp_data$Map_Pos) - min(sp_data$Map_Pos) + 1 }
       }
        
-      trait_trees <- unique(p_data$Tree) %>% as.numeric()
+      trait_trees <- p_data %>% filter(!is.na(Test_Val)) %>% pull(Tree) %>% unique() %>% as.numeric()
+      
       layout_interior <- as.vector(get_grid_layout(p_rows, p_cols, interior_only = TRUE))
+      
       is_trait_interior <- (length(layout_interior) > 0 && length(trait_trees) > 0 && all(trait_trees %in% layout_interior))
       
       layout_mat <- get_grid_layout(p_rows, p_cols, interior_only = is_trait_interior)
