@@ -113,19 +113,22 @@ parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
     raw_design <- raw_design %>% rename(Block = Rep)
   }
   
-  # Dynamic regex based on Species Code
-  spp_regex <- paste0("^\\s*", spp_code, "\\s*(\\d+)\\s*", spp_code, "\\s*(.*)$")
-  control_regex <- paste0("^\\s*", spp_code, "\\s*") # Simplified since the * is handled below
+  # THE FIX 1: Inject (?i) to make the regex explicitly CASE-INSENSITIVE
+  spp_regex <- paste0("^(?i)\\s*", spp_code, "\\s*(\\d+)\\s*", spp_code, "\\s*(.*)$")
+  control_regex <- paste0("^(?i)\\s*", spp_code, "\\s*") 
   prefix_low <- tolower(spp_code)
   
   clean_design <- raw_design %>%
     select(any_of(c("Plot", "Block", "Seedlot", "SubBlock"))) %>%
     filter(!is.na(Plot)) %>%
+    # THE FIX 2: Eradicate all hidden control characters (newlines, tabs) from Excel natively
+    mutate(Seedlot = str_replace_all(Seedlot, "[[:cntrl:]]", "")) %>%
     mutate(Seedlot = if_else(str_trim(Seedlot) == "", NA_character_, Seedlot)) %>%
-  mutate(
-    Is_Control = str_detect(Seedlot, "^\\*"),
-    Clean_Seedlot = str_replace(Seedlot, "^.*?=\\s*", "") # Strips the "48=" or "*1=" prefix
-  ) %>%
+    mutate(
+      Is_Control = str_detect(str_trim(Seedlot), "^\\*"),
+      # THE FIX 3: Bulletproof prefix stripper (ignores newlines, stops exactly at the '=')
+      Clean_Seedlot = str_replace(Seedlot, "^[^=]*=\\s*", "") 
+    ) %>%
     extract(Clean_Seedlot, into = c("Maternal_ID", "Paternal_ID"), regex = spp_regex, remove = FALSE) %>%
     mutate(
       Plot = suppressWarnings(as.numeric(Plot)),
@@ -146,7 +149,6 @@ parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
       )
     )
   
-  # Safely handle missing SubBlock (common in single-tree designs)
   if(!"SubBlock" %in% names(clean_design)) {
     clean_design$SubBlock <- NA_character_
   }
@@ -483,7 +485,7 @@ experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", "
 message(paste("Found", length(experiments_to_process), "folders to check."))
 
 # NOTE: Uncomment and set this to run specific folders for testing!
-#  experiments_to_process <- c("Speyside 21")
+#  experiments_to_process <- c("Craigellachie 49", "Spadeadam 10","Speyside 21","Speyside 23")
 
 # # # # # # # # # # # # # # # # # # # # # # # 
 # PART 2: MAIN PROCESSING LOOP ####
