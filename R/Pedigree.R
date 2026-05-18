@@ -246,6 +246,89 @@ write_csv(true_groups_export, file.path(BASE_DIR, "Pedigree", "Verified_Cycle1_G
 write_csv(true_genotypes_export, file.path(BASE_DIR, "Pedigree", "Verified_Cycle1_Genotypes_Import.csv"))
 write_csv(true_families_export, file.path(BASE_DIR, "Pedigree", "Verified_Cycle1_Families_Import.csv"))
 
+# --- 8. GENERATE COMPLETE FAMILIES ORIGIN FILE ---
+cat("\n--- CALCULATING COMPLETE FAMILY ORIGINS (MACRO-REGIONS & OPCB) ---\n")
+
+# 8.1 Create Universal Lookups 
+db_fams_char <- db_fams %>% mutate(across(everything(), as.character))
+universal_families <- bind_rows(
+  c1_tables$families %>% mutate(across(everything(), as.character)),
+  db_fams_char
+) %>% distinct(Family_name, .keep_all = TRUE)
+
+db_genos_char <- db_genos %>% mutate(across(everything(), as.character))
+universal_genotypes <- bind_rows(
+  c1_tables$genotypes %>% mutate(across(everything(), as.character)),
+  db_genos_char
+) %>% distinct(Genotype_name, .keep_all = TRUE)
+
+# 8.2 Base table: ALL families across all tranches
+ro_families <- universal_families %>%
+  filter(!str_detect(Family_name, "(?i)Founders")) %>% 
+  # Join Mum's Data
+  left_join(universal_genotypes %>% select(Genotype_name, Mum_lat = Ortet_lat, Mum_orig = Ortet_origin), 
+            by = c("Mum_name" = "Genotype_name")) %>%
+  # Join Dad's Data
+  left_join(universal_genotypes %>% select(Genotype_name, Dad_lat = Ortet_lat, Dad_orig = Ortet_origin), 
+            by = c("Dad_name" = "Genotype_name")) %>%
+  # Join Control Data
+  left_join(controls %>% select(Family_name, Control_Region = Region) %>% distinct(), 
+            by = "Family_name") %>%
+  mutate(
+    # Calculate Macro-Region (North/South). Default to "North" if Latitude is missing.
+    Mum_region = if_else(!is.na(Mum_lat) & as.numeric(Mum_lat) < 54, "South", "North"),
+    Dad_region = if_else(!is.na(Dad_lat) & as.numeric(Dad_lat) < 54, "South", "North"),
+    
+    # THE POLLEN CLOUD RULE: If Dad is an OPCB (ends in "+"), he shares the Mum's Region!
+    Dad_region = if_else(Dad_type == "G" & str_detect(Dad_name, "\\+"), Mum_region, Dad_region),
+    
+    # Assign Base Origin Strings
+    Mum_ro = if_else(Mum_type == "I", paste(Mum_region, Mum_orig, sep="_"), NA_character_),
+    
+    # If Dad is Individual, use his origin. If Dad is OPCB Pollen Cloud, use "[Region]_Unk"
+    Dad_ro = case_when(
+      Dad_type == "I" ~ paste(Dad_region, Dad_orig, sep="_"),
+      Dad_type == "G" & str_detect(Dad_name, "\\+") ~ paste(Dad_region, "Unk", sep="_"),
+      TRUE ~ NA_character_
+    )
+  )
+
+# 8.3 Extract all unique origins required for column headers
+cp_ros <- na.omit(unique(c(ro_families$Mum_ro, ro_families$Dad_ro)))
+control_ros <- na.omit(unique(ro_families$Control_Region))
+all_unique_ros <- unique(c(cp_ros, control_ros))
+
+# 8.4 Loop through the unique origins and assign the fractions
+for(ro in all_unique_ros) {
+  col_name <- paste0("Ro_", tolower(ro))
+  
+  ro_families <- ro_families %>%
+    mutate(
+      # Calculate the biological 0.5s ONLY if it's NOT a control
+      !!sym(col_name) := if_else(is.na(Control_Region),
+                                 0 + 
+                                   if_else(!is.na(Mum_ro) & Mum_ro == ro, 0.5, 0) +
+                                   if_else(!is.na(Dad_ro) & Dad_ro == ro, 0.5, 0),
+                                 0 # If it IS a control, biological math gets zeroed out
+      )
+    ) %>%
+    # Apply the 1.0 Control override
+    mutate(
+      !!sym(col_name) := if_else(!is.na(Control_Region) & Control_Region == ro, 1, !!sym(col_name))
+    )
+}
+
+# 8.5 Add Fillers and finalize the export dataframe
+families_origin_export <- ro_families %>%
+  mutate(Ro_filler = if_else(str_detect(Family_name, "(?i)Filler"), 1, 0)) %>%
+  select(Family_name, starts_with("Ro_")) %>%
+  mutate(across(starts_with("Ro_"), ~replace_na(.x, 0)))
+
+# 8.6 Export as ONE master file
+write_csv(families_origin_export, file.path(BASE_DIR, "Pedigree", "Complete_Families_Origin.csv"))
+
+cat("Generated mathematically complete origins for", nrow(families_origin_export), "families.\n")
+
 cat("\n==========================================")
 cat("\nPlotting Pedigree Networks...")
 cat("\n==========================================\n")
