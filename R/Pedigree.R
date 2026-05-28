@@ -318,6 +318,31 @@ for(ro in all_unique_ros) {
     )
 }
 
+library(dplyr)
+
+#### Diagnostic Investigation: Ro_north_unk Contributors
+# Filter and categorize the sources of the North_Unk designation
+north_unk_investigation <- ro_families %>%
+  filter(Mum_ro == "North_Unk" | Dad_ro == "North_Unk") %>%
+  mutate(
+    missing_latitude = is.na(Mum_lat) & is.na(Dad_lat),
+    primary_cause = case_when(
+      # Check if it is driven by the OPCB Pollen Cloud rule
+      Dad_type == "G" & str_detect(Dad_name, "\\+") ~ "OPCB Pollen Cloud (Rule-Forced)",
+      
+      # Check if the individual parents explicitly have "Unk" or NA origin
+      Mum_orig == "Unk" | is.na(Mum_orig) | Dad_orig == "Unk" | is.na(Dad_orig) ~ "Source DB Origin is Missing/Unk",
+      
+      TRUE ~ "Other Unknown Causes"
+    )
+  ) %>%
+  # Summarize the counts
+  count(primary_cause, missing_latitude) %>%
+  mutate(percentage = round((n / sum(n)) * 100, 1)) %>%
+  arrange(desc(n))
+
+print(north_unk_investigation)
+
 # 8.5 Add Fillers and finalize the export dataframe
 families_origin_export <- ro_families %>%
   mutate(Ro_filler = if_else(str_detect(Family_name, "(?i)Filler"), 1, 0)) %>%
@@ -328,6 +353,42 @@ families_origin_export <- ro_families %>%
 write_csv(families_origin_export, file.path(BASE_DIR, "Pedigree", "Complete_Families_Origin.csv"))
 
 cat("Generated mathematically complete origins for", nrow(families_origin_export), "families.\n")
+
+
+library(dplyr)
+library(readr)
+
+# Extract the specific families with North_Unk for manual review
+families_to_review <- ro_families %>%
+  filter(Mum_ro == "North_Unk" | Dad_ro == "North_Unk") %>%
+  mutate(
+    # Re-apply the diagnostic logic so you know exactly WHY each family failed
+    primary_cause = case_when(
+      Dad_type == "G" & str_detect(Dad_name, "\\+") ~ "OPCB Pollen Cloud",
+      Mum_orig == "Unk" | is.na(Mum_orig) | Dad_orig == "Unk" | is.na(Dad_orig) ~ "Missing/Unk in Source DB",
+      TRUE ~ "Other"
+    )
+  ) %>%
+  # Select the most relevant columns to make the review easy
+  select(
+    Family_name,
+    primary_cause,
+    Mum_name, Mum_type, Mum_lat, Mum_orig, Mum_ro,
+    Dad_name, Dad_type, Dad_lat, Dad_orig, Dad_ro
+  ) %>%
+  # Sort by the cause, then alphabetically by family
+  arrange(primary_cause, Family_name)
+
+# View the first 20 in the console
+print(families_to_review, n = 20)
+
+# Export to a CSV for your colleagues
+write_csv(
+  families_to_review, 
+  file.path(BASE_DIR, "Pedigree", "HighGCA_Unknown_Origins_Review.csv")
+)
+
+cat("\nExported", nrow(families_to_review), "families to 'HighGCA_Unknown_Origins_Review.csv'\n")
 
 cat("\n==========================================")
 cat("\nPlotting Pedigree Networks...")

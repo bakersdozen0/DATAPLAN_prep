@@ -139,7 +139,6 @@ parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
         str_trim(str_replace(Clean_Seedlot, control_regex, "")),
         NA_character_
       ),
-      # -------------------------
       Family_name = case_when(
         !is.na(Control_Name) ~ paste0(prefix_low, Control_Name),
         !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0(prefix_low, Maternal_ID, "_OPCB"),
@@ -485,7 +484,7 @@ experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", "
 message(paste("Found", length(experiments_to_process), "folders to check."))
 
 # NOTE: Uncomment and set this to run specific folders for testing!
-#  experiments_to_process <- c("Craigellachie 49", "Spadeadam 10","Speyside 21","Speyside 23")
+  experiments_to_process <- c("Brecon 8","Speyside 7")
 
 # # # # # # # # # # # # # # # # # # # # # # # 
 # PART 2: MAIN PROCESSING LOOP ####
