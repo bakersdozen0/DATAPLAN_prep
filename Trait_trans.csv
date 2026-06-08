@@ -58,3 +58,4 @@ Cull,$0/1,Whether to remove from selection based on stem form ,Growth,1,M,N,,INT
 Cr,cm,Crown width,Growth,1,M,N,,NUM,,,CR
 Ht,m,Tree height,Growth,1,M,N,,NUM,,,HEIGHT
 Frost,$1/5,"Frost damange, whether tree is 1-undamaged, 2- needles damaged, 3- frosted on main stem 4- main stem dead or 5- dead",Health,1,M,N,,INT,1,5,FR
+St_bd,,Unknown - not for TREEPLAN- demo purposes only,Form,1,M,N,,INT,,,STEM_BENDS

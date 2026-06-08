@@ -13,7 +13,7 @@ library(janitor)
 # =====================================================================
 PLOT_TYPE     <- "MULTI" # Options: "SINGLE" or "MULTI"
 # 1. Define the main species folder (Where the Traits Excel file lives)
-BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka"
+BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Demo1/Scots_Pine"
 
 # SS On Z: 
 # "//forestresearch.gov.uk/shares/CSFCC/Forest Resource and Product Assessment and Improvement/NRS-Tree Improvement/CONIFERS/SITKA SPRUCE/psi_DATAPLAN_prep"
@@ -24,7 +24,7 @@ BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritish
 
 
 # 2. Define the specific subfolder containing the trials you want to process today
-TRIAL_SERIES  <- "High GCA Fullsib P85-P87 experiments" 
+TRIAL_SERIES  <- "Trials" 
 ### e.g.: "High GCA Fullsib P85-P87 experiments" / "Backwards Selected Fullsib P96-P99 experiments" / "Trials" (For SP)
 # (e.g., switch this to "Backwards Selected Fullsib P96-P99 experiments" when needed)
 

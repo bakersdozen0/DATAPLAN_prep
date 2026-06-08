@@ -1,6 +1,15 @@
 
 
-data_dir<-"C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka"
+data_dir<-"C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Demo1/Scots_Pine"
+  
+# Set to FALSE if this is the first tranche and there is no DB to filter against.
+HAS_EXISTING_DB <- FALSE
+
+#"C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Demo1/Sitka/High GCA Fullsib P85-P87 experiments"
+
+#High GCA Fullsib P85-P87 experiments
+#Backwards Selected Fullsib P96-P99 experiments
+#"C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Demo1/Scots_Pine/Trials"
 
 library(tidyverse)
 library(readxl)
@@ -86,7 +95,7 @@ trial_analysis <- file_list %>%
       mutate(experiment_file = basename(file))
   })
 
-# 9. Final Output Organization
+# Output Organization
 final_report <- trial_analysis %>%
   select(experiment_file, assessment, assessment_year, avg_stems_per_plot, min_stems_in_a_plot, max_stems_in_a_plot, total_plots_count) %>%
   arrange(experiment_file, assessment_year)
@@ -95,45 +104,58 @@ print(final_report, n = 100)
 write_csv(final_report, file.path(data_dir, "MASTER_ASCII_Inventory_Report.csv"))
 message("Report saved successfully!")
 
-## 2: Count instances where AV was measured more than once per stem (see ASCII remarks; some instances of 
-## instances where it was taken on both NE and SW side)
 
-library(tidyverse)
-library(readxl)
-library(fs)
+## 2: Count instances where AV was measured more than once per stem #### 
+## (see ASCII remarks; some instances where it was taken on both NE and SW side)
 
-# Define paths
-root_path <- file.path(data_dir, "Backwards Selected Fullsib P96-P99 experiments")
-
-# Find all ASCII Excel files in the subfolders
-ascii_files <- dir_ls(root_path, recurse = TRUE, regexp = "(?i)_ASCII\\.xlsx$")
-
-message(paste("Found", length(ascii_files), "ASCII files. Scanning for duplicate Av measurements..."))
+message(paste("Scanning", length(file_list), "ASCII files for duplicate Av measurements..."))
 
 # Initialize an empty list to store results
 duplicate_av_list <- list()
 
-for (file_path in ascii_files) {
+for (file_path in file_list) {
   # Extract experiment name from the folder path for our report
   exp_name <- basename(dirname(file_path))
   
   tryCatch({
-    # Read the raw data safely as text
-    raw_data <- read_excel(file_path, col_types = "text")
+    # 1. Dynamically load the data based on file extension (Mirroring Part 1)
+    if (str_detect(file_path, "(?i)\\.csv$")) {
+      raw_data <- read_csv(file_path, col_types = cols(.default = "c")) %>% clean_names()
+    } else {
+      raw_data <- read_excel(file_path, col_types = "text") %>% clean_names()
+    }
     
-    # Ensure the required columns exist
-    req_cols <- c("Plot", "InferredTreePosition", "Assessment", "Assessment Year")
+    # 2. Dynamic Column Renaming (Mirroring Part 1)
+    assess_col <- intersect(c("assessment", "assessment_type_long", "assessment_type"), names(raw_data))[1]
+    if (!is.na(assess_col)) raw_data <- raw_data %>% rename(assessment = !!sym(assess_col))
+    
+    year_col <- intersect(c("assessment_year", "assessment_year_long", "age"), names(raw_data))[1]
+    if (!is.na(year_col)) raw_data <- raw_data %>% rename(assessment_year = !!sym(year_col))
+    
+    if("plot" %in% names(raw_data)) raw_data <- raw_data %>% rename(plot = plot)
+    
+    if ("inferred_tree_position" %in% names(raw_data)) {
+      raw_data <- raw_data %>% rename(tree_pos = inferred_tree_position)
+    } else {
+      raw_data <- raw_data %>% 
+        group_by(assessment, assessment_year, plot) %>% 
+        mutate(tree_pos = row_number()) %>% 
+        ungroup()
+    }
+    
+    # 3. Ensure the required columns exist after standardizing names
+    req_cols <- c("plot", "tree_pos", "assessment", "assessment_year")
     if (all(req_cols %in% names(raw_data))) {
       
       # Group by tree and age, and count the occurrences
       duplicates <- raw_data %>%
-        filter(str_detect(Assessment, "(?i)^AV")) %>% # Isolate Av measurements
-        group_by(Plot, InferredTreePosition, Assessment, `Assessment Year`) %>%
-        summarise(Measurement_Count = n(), .groups = "drop") %>%
-        filter(Measurement_Count > 1) # Keep only the ones with multiple readings
+        filter(str_detect(assessment, "(?i)^AV")) %>% # Isolate Av measurements
+        group_by(plot, tree_pos, assessment, assessment_year) %>%
+        summarise(measurement_count = n(), .groups = "drop") %>%
+        filter(measurement_count > 1) # Keep only the ones with multiple readings
       
       if (nrow(duplicates) > 0) {
-        duplicates <- duplicates %>% mutate(Experiment = exp_name)
+        duplicates <- duplicates %>% mutate(experiment = exp_name)
         duplicate_av_list[[exp_name]] <- duplicates
       }
     }
@@ -145,7 +167,7 @@ for (file_path in ascii_files) {
 # Compile and print the results
 if (length(duplicate_av_list) > 0) {
   all_duplicates <- bind_rows(duplicate_av_list) %>%
-    select(Experiment, Plot, Tree = InferredTreePosition, Assessment, Age = `Assessment Year`, Measurement_Count) %>%
+    select(Experiment = experiment, Plot = plot, Tree = tree_pos, Assessment = assessment, Age = assessment_year, Measurement_Count = measurement_count) %>%
     arrange(Experiment, as.numeric(Plot), as.numeric(Tree))
   
   message("\n==========================================")
@@ -155,8 +177,8 @@ if (length(duplicate_av_list) > 0) {
   message("\nHere is a preview of the duplicates:")
   print(head(all_duplicates, 15))
   
-  # Export the full report to a CSV in your root folder
-  out_path <- file.path(root_path, "Repeat_Av_Scan_Results.csv")
+  # Export the full report to a CSV using the unified data_dir variable
+  out_path <- file.path(data_dir, "Repeat_Av_Scan_Results.csv")
   write_csv(all_duplicates, out_path)
   message(paste("\nFull diagnostic report saved to:", out_path))
   
@@ -165,14 +187,13 @@ if (length(duplicate_av_list) > 0) {
 }
 
 ## Counting families/dams & sires: ####
-
-## count unique and shared parents
-# 1. Define your two directories
-cycle_1_dir <- file.path(data_dir,"High GCA Fullsib P85-P87 experiments") 
-cycle_2_dir <- file.path(data_dir,"Backwards Selected Fullsib P96-P99 experiments")
+## Count unique and shared parents
+# 1. Define your two directories using generalized terms (previously Cycle 1 and 2)
+pending_dir <- file.path(data_dir, "Trials") 
+existing_dir <- file.path(data_dir, "Backwards Selected Fullsib P96-P99 experiments")
 
 # 2. Create the function
-count_parents_from_family <- function(dir_path, cycle_name) {
+count_parents_from_family <- function(dir_path, batch_name) {
   
   file_list <- dir_ls(dir_path, recurse = TRUE, regexp = "Full_Data_With_Flags\\.csv$")
   
@@ -185,21 +206,17 @@ count_parents_from_family <- function(dir_path, cycle_name) {
         error = function(e) return(NULL) 
       )
       
-      # Check if the file loaded and has the 'family_name' column
       if (is.null(df) || !"family_name" %in% names(df)) return(NULL)
       
       df %>%
-        # Grab just the family name column
         select(family_name) %>%
-        # Filter down to unique families early on to save processing time
         distinct() %>% 
-        # Split the string at the underscore into two new columns
         separate(
           col = family_name, 
           into = c("dam", "sire"), 
           sep = "_", 
-          fill = "right",   # If there's no underscore, it assumes the tree is the dam and makes the sire NA
-          extra = "merge"   # If there are two underscores, it keeps the extra bits attached to the sire
+          fill = "right",   
+          extra = "merge"   
         ) %>%
         mutate(across(everything(), as.character)) 
     })
@@ -207,13 +224,11 @@ count_parents_from_family <- function(dir_path, cycle_name) {
   # 3. Calculate the unique statistics
   unique_dams <- n_distinct(all_parents$dam, na.rm = TRUE)
   unique_sires <- n_distinct(all_parents$sire, na.rm = TRUE)
-  
-  # Total unique trees used as a parent (union of both Dam and Sire)
   total_unique_trees <- n_distinct(c(all_parents$dam, all_parents$sire), na.rm = TRUE)
   
   # 4. Return as a single row summary
   tibble(
-    cycle = cycle_name,
+    batch = batch_name,
     unique_dams = unique_dams,
     unique_sires = unique_sires,
     total_unique_parent_trees = total_unique_trees
@@ -221,21 +236,30 @@ count_parents_from_family <- function(dir_path, cycle_name) {
 }
 
 # 5. Run the function and ASSIGN the results
-cycle_1_summary <- count_parents_from_family(cycle_1_dir, "P80 experiments")
-cycle_2_summary <- count_parents_from_family(cycle_2_dir, "P90 experiments")
+pending_summary <- count_parents_from_family(pending_dir, "Pending Upload")
+
+if (HAS_EXISTING_DB) {
+  existing_summary <- count_parents_from_family(existing_dir, "Existing Database")
+} else {
+  # Generate a zeroed-out placeholder to keep the output table tidy
+  existing_summary <- tibble(
+    batch = "Existing Database",
+    unique_dams = 0,
+    unique_sires = 0,
+    total_unique_parent_trees = 0
+  )
+}
 
 # 6. Now combine them
-final_comparison <- bind_rows(cycle_1_summary, cycle_2_summary)
+final_comparison <- bind_rows(pending_summary, existing_summary)
 
-##count unique and shared families ###
+## Count unique and shared families ###
 
 # 2. Function to just grab a clean list of unique family names from a directory
 get_unique_families <- function(dir_path) {
   
-  # 1. Use case-insensitive regex to be safe
   file_list <- dir_ls(dir_path, recurse = TRUE, regexp = "(?i)Full_Data_With_Flags\\.csv$")
   
-  # Check if we even found files before proceeding
   if (length(file_list) == 0) {
     warning(paste("No files found in:", dir_path))
     return(character(0)) 
@@ -248,243 +272,163 @@ get_unique_families <- function(dir_path) {
         error = function(e) return(NULL) 
       )
       
-      # Check if the column exists (clean_names makes it lowercase)
       if (is.null(df) || !"family_name" %in% names(df)) return(NULL)
-      
       df %>% select(family_name) %>% distinct()
     })
   
-  # 2. Check if the resulting dataframe is empty before pulling
   if (nrow(extracted_data) == 0) {
     return(character(0))
   }
   
-  extracted_data %>%
-    pull(family_name) %>%
-    unique() %>%
-    na.omit()
+  extracted_data %>% pull(family_name) %>% unique() %>% na.omit()
 }
 
-# 3. Get the lists of families for both cycles
-families_c1 <- get_unique_families(cycle_1_dir)
-families_c2 <- get_unique_families(cycle_2_dir)
+# 3. Get the lists of families for both batches
+families_pending <- get_unique_families(pending_dir)
+
+if (HAS_EXISTING_DB) {
+  families_existing <- get_unique_families(existing_dir)
+} else {
+  families_existing <- character(0) # Empty vector for seamless setdiff math
+}
 
 # 4. Perform set operations to count overlap and uniqueness
-shared_families   <- length(intersect(families_c1, families_c2))
-unique_to_cycle_1 <- length(setdiff(families_c1, families_c2))
-unique_to_cycle_2 <- length(setdiff(families_c2, families_c1))
+shared_families   <- length(intersect(families_pending, families_existing))
+unique_to_pending <- length(setdiff(families_pending, families_existing))
+unique_to_existing <- length(setdiff(families_existing, families_pending))
 
 # 5. Build a neat summary table
 family_comparison <- tibble(
   metric = c(
-    "Total Families in Cycle 1", 
-    "Total Families in Cycle 2",
-    "Shared (In Both Cycles)", 
-    "Unique to Cycle 1 Only", 
-    "Unique to Cycle 2 Only"
+    "Total Families in Pending Upload", 
+    "Total Families in Existing DB",
+    "Shared (In Both)", 
+    "Unique to Pending Upload Only", 
+    "Unique to Existing DB Only"
   ),
   count = c(
-    length(families_c1),
-    length(families_c2),
+    length(families_pending),
+    length(families_existing),
     shared_families,
-    unique_to_cycle_1,
-    unique_to_cycle_2
+    unique_to_pending,
+    unique_to_existing
   )
 )
 
 print(family_comparison)
 
 
-### get all unique family names ####
-cycle_1_unique_families <- dir_ls(cycle_1_dir, recurse = TRUE, regexp = "Full_Data_With_Flags\\.csv$") %>%
+### Get all unique family names from Pending ###
+pending_unique_families <- dir_ls(pending_dir, recurse = TRUE, regexp = "Full_Data_With_Flags\\.csv$") %>%
   map_df(function(file) {
-    
-    # Safely read the CSV and clean column names
     df <- tryCatch(
       read_csv(file, show_col_types = FALSE) %>% clean_names(),
       error = function(e) return(NULL) 
     )
-    
-    # Check if the dataframe loaded and actually contains the family_name column
     if (is.null(df) || !"family_name" %in% names(df)) return(NULL)
-    
-    # Grab just the family names
-    df %>% 
-      select(family_name) %>% 
-      distinct()
+    df %>% select(family_name) %>% distinct()
   }) %>%
-  # Pull the column into a vector, find unique values, and remove NAs
   pull(family_name) %>%
   unique() %>%
   na.omit()
 
-# 3. View the final list
-print(cycle_1_unique_families)
+print(pending_unique_families)
 
-write_csv(all_unique_parents, file.path(data_dir,"All_Unique_Parents_List.csv"))
-
+# write_csv(all_unique_parents, file.path(data_dir,"All_Unique_Parents_List.csv"))
 
 
-# 1. Define your directories
-cycle_1_dir <- file.path(data_dir,"High GCA Fullsib P85-P87 experiments") 
-cycle_2_dir <- file.path(data_dir,"Backwards Selected Fullsib P96-P99 experiments")
+### Categorize parsed families and compare ###
+pending_data <- get_parsed_families(pending_dir)
 
-# 2. Create the robust extraction function
-get_parsed_families <- function(dir_path) {
-  
-  # Extract raw family names
-  raw_families <- dir_ls(dir_path, recurse = TRUE, regexp = "(?i)Full_Data_With_Flags\\.csv$") %>%
+if (HAS_EXISTING_DB) {
+  existing_data <- get_parsed_families(existing_dir)
+} else {
+  # Empty dataframe to allow anti_join to pass all pending data through
+  existing_data <- tibble(family_name = character(), family_type = character(), dam = character(), sire = character())
+}
+
+# FIND EXCLUSIVE FAMILIES
+families_exclusive_to_pending <- anti_join(pending_data, existing_data, by = "family_name")
+families_exclusive_to_existing <- anti_join(existing_data, pending_data, by = "family_name")
+
+# FIND EXCLUSIVE INDIVIDUAL PARENTS
+pending_parents <- na.omit(unique(c(pending_data$dam, pending_data$sire)))
+existing_parents <- na.omit(unique(c(existing_data$dam, existing_data$sire)))
+
+parents_exclusive_to_pending <- setdiff(pending_parents, existing_parents) %>% sort()
+parents_exclusive_to_existing <- setdiff(existing_parents, pending_parents) %>% sort()
+
+
+cat("\n--- SUMMARY ---\n")
+cat("Exclusive Families in Pending Upload:", nrow(families_exclusive_to_pending), "\n")
+cat("Exclusive Families in Existing DB:", nrow(families_exclusive_to_existing), "\n")
+cat("Exclusive Parents in Pending Upload:", length(parents_exclusive_to_pending), "\n")
+cat("Exclusive Parents in Existing DB:", length(parents_exclusive_to_existing), "\n")
+
+### Pull "GEN" info for Pending/Existing and compare: ####
+
+# Define species prefix for founder genotypes (e.g., "sp" or "ss")
+species_prefix <- "sp" 
+
+# 1. Load Founders once (Ensure file name matches your species)
+founders <- read_csv(file.path(data_dir,"Pedigree", "SP_tibdb_clones.csv"), show_col_types = FALSE) %>%
+  mutate(Genotype_name = paste0(species_prefix, number))
+
+# 2. Create the generalized function
+get_genotype_origins <- function(target_dir, founders_df) {
+  families <- dir_ls(target_dir, recurse = TRUE, regexp = "(?i)Full_Data_With_Flags\\.csv$") %>%
     map_df(function(file) {
       df <- tryCatch(
-        read_csv(file, show_col_types = FALSE) %>% clean_names(),
-        error = function(e) return(NULL) 
+        # Force all columns to character to prevent read_csv parsing warnings
+        read_csv(file, show_col_types = FALSE, col_types = cols(.default = col_character())) %>% clean_names(), 
+        error = function(e) return(NULL)
       )
+      
+      # Update: Check for lowercase "family_name" generated by clean_names()
       if (is.null(df) || !"family_name" %in% names(df)) return(NULL)
       
       df %>% select(family_name) %>% distinct()
     }) %>%
-    pull(family_name) %>%
-    unique() %>%
-    na.omit() %>%
-    as_tibble() %>%
-    rename(family_name = value)
+    drop_na() %>% pull(family_name) %>% unique()
   
-  # Parse and categorize
-  parsed_df <- raw_families %>%
+  parents <- tibble(family_name = families) %>%
+    filter(str_detect(family_name, "_"), !str_detect(family_name, "(?i)iller")) %>%
     mutate(
-      family_type = case_when(
-        str_detect(family_name, "(?i)Filler") ~ "Control/Filler",
-        str_detect(family_name, "(?i)OP") ~ "Open Pollinated",
-        !str_detect(family_name, "_") ~ "Other/Single ID", 
-        TRUE ~ "Controlled Cross"
-      ),
-      dam = case_when(
-        family_type %in% c("Control/Filler", "Other/Single ID") ~ family_name, 
-        TRUE ~ str_extract(family_name, "^[^_]+") 
-      ),
-      sire = case_when(
-        family_type %in% c("Control/Filler", "Other/Single ID") ~ NA_character_, 
-        TRUE ~ str_extract(family_name, "(?<=_).*") 
-      )
-    )
-  
-  return(parsed_df)
-}
-
-# 3. Run the function on both directories
-c1_data <- get_parsed_families(cycle_1_dir)
-c2_data <- get_parsed_families(cycle_2_dir)
-
-
-# 4. FIND EXCLUSIVE FAMILIES
-
-
-# Families in Cycle 1 but NOT in Cycle 2
-families_unique_to_c1 <- anti_join(c1_data, c2_data, by = "family_name")
-
-# Families in Cycle 2 but NOT in Cycle 1
-families_unique_to_c2 <- anti_join(c2_data, c1_data, by = "family_name")
-
-
-# 5. FIND EXCLUSIVE INDIVIDUAL PARENTS
-
-
-# First, extract just the unique vectors of parents for both
-c1_parents <- na.omit(unique(c(c1_data$dam, c1_data$sire)))
-c2_parents <- na.omit(unique(c(c2_data$dam, c2_data$sire)))
-
-# Parents in Cycle 1 but NOT in Cycle 2
-parents_unique_to_c1 <- setdiff(c1_parents, c2_parents) %>% sort()
-
-# Parents in Cycle 2 but NOT in Cycle 1
-parents_unique_to_c2 <- setdiff(c2_parents, c1_parents) %>% sort()
-
-
-# Print some summaries to the console
-cat("\n--- SUMMARY ---\n")
-cat("Exclusive Families in Cycle 1:", nrow(families_unique_to_c1), "\n")
-cat("Exclusive Families in Cycle 2:", nrow(families_unique_to_c2), "\n")
-cat("Exclusive Parents in Cycle 1:", length(parents_unique_to_c1), "\n")
-cat("Exclusive Parents in Cycle 2:", length(parents_unique_to_c2), "\n")
-
-
-
-### Pull "GEN" info for Cycle 1/2 and compare: ####
-## NB: "GEN" is renamed "Origin" in the output files, and is NOT referring to the ORIGIN column in clones_tibdb
-# 1. Load Founders once
-founders <- read_csv(file.path(data_dir,"Pedigree", "SS_tibdb_clones.csv"), show_col_types = FALSE) %>%
-  mutate(Genotype_name = paste0("ss", number))
-
-# 2. Create the generalized function
-get_genotype_origins <- function(target_dir, founders_df) {
-  
-  # Extract unique families from the target directory
-  families <- dir_ls(target_dir, recurse = TRUE, regexp = "(?i)Full_Data_With_Flags\\.csv$") %>%
-    map_df(function(file) {
-      df <- tryCatch(
-        read_csv(file, show_col_types = FALSE, col_types = cols(.default = col_character())) %>% clean_names(), 
-        error = function(e) return(NULL)
-      )
-      if (is.null(df) || !"Family_name" %in% names(df)) return(NULL)
-      
-      df %>% select(Family_name) %>% distinct()
-    }) %>%
-    drop_na() %>%
-    pull(Family_name) %>%
-    unique()
-  
-  # Parse out the unique parent IDs (Mums and Dads)
-  parents <- tibble(Family_name = families) %>%
-    filter(str_detect(Family_name, "_"), !str_detect(Family_name, "(?i)iller")) %>%
-    mutate(
-      Mum = str_extract(Family_name, "^[^_]+"),
-      Raw_Dad = str_extract(Family_name, "(?<=_).*"),
+      Mum = str_extract(family_name, "^[^_]+"),
+      Raw_Dad = str_extract(family_name, "(?<=_).*"),
       Dad = if_else(str_detect(Raw_Dad, "(?i)OP"), NA_character_, Raw_Dad)
     )
   
-  # Create a single, distinct list of parent genotypes
   unique_genotypes <- unique(na.omit(c(parents$Mum, parents$Dad)))
   
-  # Join with founders to check the GEN column
   genotype_gen_check <- tibble(Genotype_name = unique_genotypes) %>%
     left_join(founders_df %>% select(Genotype_name, GEN), by = "Genotype_name")
   
   return(genotype_gen_check)
 }
 
-# 3. Run the function for both directories
-c1_genotypes <- get_genotype_origins(file.path(data_dir,"High GCA Fullsib P85-P87 experiments"), founders)
-c2_genotypes <- get_genotype_origins(file.path(data_dir,"Backwards Selected Fullsib P96-P99 experiments"), founders)
+pending_genotypes <- get_genotype_origins(pending_dir, founders)
+pending_summary <- pending_genotypes %>% count(GEN, name = "Pending_Count")
 
-# 4. Create summaries for both
-c1_summary <- c1_genotypes %>% count(GEN, name = "Cycle_1_Count")
-c2_summary <- c2_genotypes %>% count(GEN, name = "Cycle_2_Count")
+if (HAS_EXISTING_DB) {
+  existing_genotypes <- get_genotype_origins(existing_dir, founders)
+  existing_summary <- existing_genotypes %>% count(GEN, name = "Existing_Count")
+} else {
+  existing_summary <- tibble(GEN = character(), Existing_Count = numeric())
+}
 
-# 5. Join them together for a side-by-side comparison
-comparison_summary <- full_join(c1_summary, c2_summary, by = "GEN") %>%
-  # Replace NA counts with 0 for cleaner reading
-  mutate(across(c(Cycle_1_Count, Cycle_2_Count), ~replace_na(.x, 0))) %>%
+comparison_summary <- full_join(pending_summary, existing_summary, by = "GEN") %>%
+  mutate(across(c(Pending_Count, Existing_Count), ~replace_na(.x, 0))) %>%
   arrange(GEN)
 
-# Print the final comparison
 cat("\n--- Side-by-Side Comparison of 'GEN' values ---\n")
 print(comparison_summary)
 
-
-
-#### Pull all instances of Open-pollination in Wide_data_With_Flags and the Design files: ####
-library(tidyverse)
-library(fs)
-library(here)
-library(readxl)
-
-# 1. Define your target directory 
-target_dir <- file.path(data_dir,"High GCA Fullsib P85-P87 experiments")
+#### Extract all instances of Open-pollination in Data and Design files: ####
 
 # PART 1: EXTRACT FROM FULL DATA FILES
 cat("\nScanning Full Data files...\n")
-# FIX: Now scanning Full_Data_With_Flags.csv!
-full_data_files <- dir_ls(target_dir, recurse = TRUE, regexp = "(?i)Full_Data_With_Flags\\.csv$")
+full_data_files <- dir_ls(pending_dir, recurse = TRUE, regexp = "(?i)Full_Data_With_Flags\\.csv$")
 
 if (length(full_data_files) == 0) cat("WARNING: No Full Data files found!\n")
 
@@ -496,18 +440,15 @@ op_trial_data <- full_data_files %>%
     )
     if (is.null(df)) return(NULL)
     
-    # Safely find the family_name column
     fam_col <- grep("(?i)^family_name$", names(df), value = TRUE)
     if (length(fam_col) == 0) return(NULL)
     
-    # Extract the experiment name
     exp_name <- str_replace_all(str_extract(basename(file), "^[^_]+"), " ", "_")
     
     df %>%
       rename(Family_name = all_of(fam_col[1])) %>%
       select(Family_name) %>%
       distinct() %>%
-      # The Hunt: Find anything with "OP" (this will catch OPST, OPCB, ssOP, etc.)
       filter(str_detect(Family_name, "(?i)OP")) %>%
       mutate(
         Experiment_Name = exp_name,
@@ -517,9 +458,8 @@ op_trial_data <- full_data_files %>%
   })
 
 # PART 2: EXTRACT FROM DESIGN FILES
-
 cat("Scanning Design files...\n")
-design_files <- dir_ls(target_dir, recurse = TRUE, regexp = "(?i)design.*\\.(csv|xlsx)$")
+design_files <- dir_ls(pending_dir, recurse = TRUE, regexp = "(?i)design.*\\.(csv|xlsx)$")
 
 if (length(design_files) == 0) cat("WARNING: No Design files found!\n")
 
@@ -536,7 +476,6 @@ op_design_data <- design_files %>%
     
     if (is.null(df)) return(NULL)
     
-    # Safely find the seedlot column
     seed_col <- grep("(?i)seedlot", names(df), value = TRUE)
     if (length(seed_col) == 0) return(NULL)
     
@@ -554,10 +493,7 @@ op_design_data <- design_files %>%
       )
   })
 
-
 # PART 3: SAFELY EXPORT FOR COMPARISON
-
-
 cat("\n--- Full Data OP Families (Trial Data) ---\n")
 if (!is.null(op_trial_data) && nrow(op_trial_data) > 0 && "Experiment_Name" %in% names(op_trial_data)) {
   print(op_trial_data %>% arrange(Experiment_Name, Family_name), n = 100)
@@ -573,8 +509,6 @@ if (!is.null(op_design_data) && nrow(op_design_data) > 0 && "Experiment_Name" %i
 } else {
   cat("No 'OP' seedlots found in Design Data files (or files missing).\n")
 }
-
-
 
 #### What's going on with Radnor 55 Cr_07? ####
 ## There's an overabundance of values ~200: 
