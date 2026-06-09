@@ -21,7 +21,7 @@ TEST_TRAITS    <- c("Dm_10","Ht_10","Pil_15","Dm_15","Cr_07")
 EXPECT_NEGATIVE_COR <- FALSE # <--- Set to TRUE if expecting negative correlations among traits!
 USE_CORRECTED_DATA  <- FALSE
 
-# --- Auto-Path Logic & Subdirectory Management ---
+# --- Auto-Path Logic & SubdirectoP-datary Management ---
 if(USE_CORRECTED_DATA) {
   WIDE_DATA_CSV <- stringr::str_replace(RAW_WIDE_DATA_CSV, "(?i)\\.csv$", "_Corrected.csv")
   out_suffix <- "_Chained"
@@ -166,6 +166,7 @@ for (TEST_TRAIT in TEST_TRAITS) {
   message(paste("Testing", length(plots), ifelse(PLOT_TYPE=="SINGLE", "blocks", "plots"), "against permutations..."))
   
   for (p in plots) {
+    p_data <- plot_data  # <--- ADD THIS DEFINITION HERE
     plot_data <- working_data %>% filter(Plot == p)
     if(sum(!is.na(plot_data$Base_Val)) < 3 || sum(!is.na(plot_data$Test_Val)) < 3) next
     
