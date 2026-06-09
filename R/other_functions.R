@@ -1,6 +1,6 @@
 
 
-data_dir<-"C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Demo1/Scots_Pine"
+data_dir<-"C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Demo2/Scots_Pine"
   
 # Set to FALSE if this is the first tranche and there is no DB to filter against.
 HAS_EXISTING_DB <- FALSE
@@ -189,7 +189,7 @@ if (length(duplicate_av_list) > 0) {
 ## Counting families/dams & sires: ####
 ## Count unique and shared parents
 # 1. Define your two directories using generalized terms (previously Cycle 1 and 2)
-pending_dir <- file.path(data_dir, "Trials") 
+pending_dir <- file.path(data_dir, "Diallel") 
 existing_dir <- file.path(data_dir, "Backwards Selected Fullsib P96-P99 experiments")
 
 # 2. Create the function
@@ -338,6 +338,57 @@ print(pending_unique_families)
 
 
 ### Categorize parsed families and compare ###
+# ====================================================================
+# FUNCTION: get_parsed_families
+# Extracts, splits, and categorizes families from all trial data
+# ====================================================================
+get_parsed_families <- function(dir_path) {
+  
+  # 1. Find all data files
+  file_list <- dir_ls(dir_path, recurse = TRUE, regexp = "(?i)Full_Data_With_Flags\\.csv$")
+  
+  if (length(file_list) == 0) {
+    # If the folder is empty, return an empty template so downstream joins don't break
+    return(tibble(family_name = character(), family_type = character(), dam = character(), sire = character()))
+  }
+  
+  # 2. Extract unique family names
+  raw_families <- file_list %>%
+    map_df(function(file) {
+      df <- tryCatch(
+        read_csv(file, show_col_types = FALSE, col_types = cols(.default = col_character())) %>% clean_names(),
+        error = function(e) return(NULL) 
+      )
+      
+      if (is.null(df) || !"family_name" %in% names(df)) return(NULL)
+      
+      df %>% select(family_name) %>% distinct()
+    }) %>%
+    distinct() %>%
+    drop_na(family_name)
+  
+  # 3. Parse and categorize the parents
+  parsed_data <- raw_families %>%
+    mutate(
+      # Dam is everything before the first underscore
+      dam = str_extract(family_name, "^[^_]+"),
+      
+      # Sire is everything after the first underscore
+      sire = str_extract(family_name, "(?<=_).*"),
+      
+      # Categorize based on naming conventions
+      family_type = case_when(
+        str_detect(family_name, "(?i)OP") ~ "Open Pollinated (OP)",
+        str_detect(family_name, "(?i)iller") ~ "Filler",
+        is.na(sire) ~ "Control / Provenance", # If there's no underscore, it's usually a control
+        TRUE ~ "Control Pollinated (CP)"
+      )
+    ) %>%
+    select(family_name, family_type, dam, sire)
+  
+  return(parsed_data)
+}
+
 pending_data <- get_parsed_families(pending_dir)
 
 if (HAS_EXISTING_DB) {

@@ -3,23 +3,23 @@
 # =====================================================================
 
 # 1. Base Paths & Species Identifiers
-BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka"
+BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Demo2/Scots_Pine"
 
-SPECIES_CODE  <- "SS"         # Options: "SS" or "SP"
-SPECIES_NAME  <- "CBCSitka"   # Options: "CBCSitka" or "CBCScots"
+SPECIES_CODE  <- "SP"         # Options: "SS" or "SP"
+SPECIES_NAME  <- "CBCScots"   # Options: "CBCSitka" or "CBCScots"
 
 # 2. Input File Names (Dynamically structured)
 FOUNDERS_FILE <- paste0(SPECIES_CODE, "_tibdb_clones.csv") 
 CONTROLS_FILE <- "dataplan_family_control_import.csv" 
 OP_FAM_FILE   <- paste0(SPECIES_CODE, "_OP_Families.xlsx")
 
-# 2. Database Toggle 
+# 3. Directories containing the pending trial data and existing live DB exports
+PENDING_DIR   <- file.path(BASE_DIR, "Diallel")
+
+# 4. Database Toggle 
 # Set to FALSE if this is the first tranche and there is no DB to filter against.
 HAS_EXISTING_DB <- FALSE
-
-# 3. Directories containing the pending trial data and existing live DB exports
-PENDING_DIR   <- file.path(BASE_DIR, "Target_Upload_Experiments")
-EXISTING_DIR  <- file.path(BASE_DIR, "Existing_Database_Exports")
+EXISTING_DIR  <- file.path(BASE_DIR, "Backwards Selected Fullsib P96-P99 experiments")
 
 # =====================================================================
 
@@ -40,12 +40,28 @@ cat("\n==========================================\n")
 # --- 1. LOAD FOUNDERS, CONTROLS, AND OP FAMILIES ---
 prefix_low <- tolower(SPECIES_CODE)
 
+# 1. Load Founders and force headers to lowercase, then fix the specific ones the script needs
 founders <- read_csv(file.path(BASE_DIR, "Pedigree", FOUNDERS_FILE), show_col_types = FALSE) %>%
+  janitor::clean_names() %>% 
+  rename(LOCAT = locat, GEN = gen, PYR = pyr) %>% # Forces these critical columns to uppercase for the script
   mutate(Genotype_name = paste0(prefix_low, number))
 
+# 2. Load Controls
 controls <- read_csv(file.path(BASE_DIR, "Pedigree", CONTROLS_FILE), show_col_types = FALSE)
 
+# 3. Load OP Families and force headers to standard snake_case
 op_families <- read_excel(file.path(BASE_DIR, "Pedigree", OP_FAM_FILE)) %>% 
+  janitor::clean_names() %>% 
+  mutate(across(everything(), as.character)) %>% # <--- THE BLANK TEMPLATE NUKE! Forces all empty columns to Text.
+  rename(
+    Family_name = family_name, 
+    Mum_name = mum_name, 
+    Mum_type = mum_type, 
+    Dad_name = dad_name, 
+    Dad_type = dad_type, 
+    Fam_description = fam_description,
+    LOCAT = locat 
+  ) %>% 
   mutate(across(where(is.character), str_trim))
 
 # --- 2. THE PEDIGREE GENERATOR FUNCTION ---
@@ -53,11 +69,11 @@ build_pedigree <- function(target_dir, founders, controls, op_families, species_
   is_target_batch <- str_detect(target_dir, "(?i)Target|High GCA")
   
   # 1. EXTRACT CURATED TRIAL DATA
-  trial_files <- dir_ls(target_dir, recurse = TRUE, regexp = "(?i)_DP_ready\\.csv$")
+  trial_files <- dir_ls(target_dir, recurse = TRUE, regexp = "(?i)_data\\.xlsx$")
   
   trial_data <- trial_files %>%
     map_df(function(file) {
-      df <- tryCatch(read_csv(file, show_col_types = FALSE, col_types = cols(.default = col_character())), error = function(e) NULL)
+      df <- tryCatch(read_excel(file, col_types = "text"), error = function(e) NULL)
       if (is.null(df)) return(NULL)
       fam_col <- grep("(?i)^family_name$", names(df), value = TRUE)
       if (length(fam_col) == 0) return(NULL)
