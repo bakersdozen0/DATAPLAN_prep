@@ -70,18 +70,52 @@
           NA_character_
         )
       )
-    
-    # Parse PLOTS
-    plot_lines <- raw_lines[(plot_start + 1):length(raw_lines)]
-    plot_lines <- plot_lines[grep(":", plot_lines)]
-    
-    # Dynamic 3-column (Single) or 4-column (Multi) parsing
-    plot_df <- tibble(line = plot_lines) %>%
-      extract(line, into = c("Plot", "Design_ID", "Col3", "Col4"), 
-              regex = "^\\s*(\\d+):\\s*(\\d+)\\s+(\\d+)(?:\\s+(\\d+))?", convert = TRUE) %>%
-      mutate(
-        Block = if_else(is.na(Col4), as.character(Col3), as.character(Col4)),
-        SubBlock = if_else(is.na(Col4), NA_character_, as.character(Col3))
+    ) %>%  
+    select(Plot, Block, SubBlock, Family_name)
+  
+  return(final_design)
+}
+
+# --- 1b. Parse Design File (XLSX) ---
+parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
+  raw_design <- read_excel(filepath, col_types = "text")
+  
+  if("Rep" %in% names(raw_design) && !"Block" %in% names(raw_design)) {
+    raw_design <- raw_design %>% rename(Block = Rep)
+  }
+  
+  # THE FIX 1: Inject (?i) to make the regex explicitly CASE-INSENSITIVE
+  spp_regex <- paste0("^(?i)\\s*", spp_code, "\\s*(\\d+)\\s*", spp_code, "\\s*(.*)$")
+  control_regex <- paste0("^(?i)\\s*", spp_code, "\\s*") 
+  prefix_low <- tolower(spp_code)
+  
+  clean_design <- raw_design %>%
+    select(any_of(c("Plot", "Block", "Seedlot", "SubBlock"))) %>%
+    filter(!is.na(Plot)) %>%
+    # THE FIX 2: Eradicate all hidden control characters (newlines, tabs) from Excel natively
+    mutate(Seedlot = str_replace_all(Seedlot, "[[:cntrl:]]", "")) %>%
+    mutate(Seedlot = if_else(str_trim(Seedlot) == "", NA_character_, Seedlot)) %>%
+    mutate(
+      Is_Control = str_detect(str_trim(Seedlot), "^\\*"),
+      # THE FIX 3: Bulletproof prefix stripper (ignores newlines, stops exactly at the '=')
+      Clean_Seedlot = str_replace(Seedlot, "^[^=]*=\\s*", "") 
+    ) %>%
+    extract(Clean_Seedlot, into = c("Maternal_ID", "Paternal_ID"), regex = spp_regex, remove = FALSE) %>%
+    mutate(
+      Plot = suppressWarnings(as.numeric(Plot)),
+      Maternal_ID = str_trim(Maternal_ID),
+      Paternal_ID = str_trim(Paternal_ID),
+      Control_Name = if_else(
+        Is_Control,
+        str_trim(str_replace(Clean_Seedlot, control_regex, "")),
+        NA_character_
+      ),
+      Family_name = case_when(
+        !is.na(Control_Name) ~ paste0(prefix_low, Control_Name),
+        !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0(prefix_low, Maternal_ID, "_OPCB"),
+        !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0(prefix_low, Maternal_ID, "_", prefix_low, Paternal_ID),
+        is.na(Seedlot) ~ paste0(exp_prefix, "_Filler"),
+        TRUE ~ paste0(exp_prefix, "_Filler")
       )
     
     # Join and build Family_name
@@ -437,6 +471,38 @@
     if(interior_only && n_rows >= 3 && n_cols >= 3) mat <- mat[2:(n_rows-1), 2:(n_cols-1)]
     return(mat)
   }
+  return(path)
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # 
+# PART 1: LOAD TRANSLATION MAP & FOLDERS ####
+# # # # # # # # # # # # # # # # # # # # # # # 
+
+if (file.exists(TRAITS_FILE)) {
+  trait_map <- read_csv(TRAITS_FILE, show_col_types = FALSE) %>%
+    select(trait_code_FR = `Eng Desc`, trait_code_DP = Trait, xml_group = Group, xml_desc_base = Description, xml_units = Units) %>%
+    mutate(across(everything(), as.character)) %>%
+    filter(!is.na(trait_code_FR), !is.na(trait_code_DP)) %>%
+    arrange(desc(nchar(trait_code_FR)))
+} else {
+  stop(paste("Error: Trait translation file not found at:", TRAITS_FILE))
+}
+
+all_dirs <- list.dirs(path = ROOT_DATA_DIR, recursive = FALSE, full.names = FALSE)
+experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", ".Rproj.user"))
+message(paste("Found", length(experiments_to_process), "folders to check."))
+
+# NOTE: Uncomment and set this to run specific folders for testing!
+  experiments_to_process <- c("Brecon 8","Speyside 7")
+
+# # # # # # # # # # # # # # # # # # # # # # # 
+# PART 2: MAIN PROCESSING LOOP ####
+# # # # # # # # # # # # # # # # # # # # # # # 
+
+# Initialize a list to hold correlations for the master summary
+master_correlations_list <- list()
+
+for (curr_exp in experiments_to_process) {
   
   get_traversal_path <- function(layout_mat, start_corner="top_left", direction="horizontal", snake=FALSE) {
     if (length(layout_mat) == 8) {
