@@ -7,21 +7,21 @@ library(fs)
 # ============================================================================
 #### 1. USER CONFIGURATION ####
 # ============================================================================
-RAW_WIDE_DATA_CSV <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka/High GCA Fullsib P85-P87 experiments/Craigellachie 49/Craigellachie_49_Full_Data_With_Flags.csv"
+RAW_WIDE_DATA_CSV <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Demo1/Scots_Pine/Trials/Culloden10/Culloden10_Full_Data_With_Flags.csv"
 
 PLOT_TYPE      <- "MULTI"  # Options: "SINGLE" (evaluates Plot sequence within Blocks) or "MULTI" (Trees within Plots)
 
 # FALLBACK GRID DIMENSIONS (Used only if spatial Prow/Ppos are missing from the data)
-GRID_ROWS      <- 8
-GRID_COLS      <- 1
+GRID_ROWS      <- 1
+GRID_COLS      <- 8
 
 BASELINE_TRAIT <- "Dm_10" 
-TEST_TRAITS    <- c("Ht_06","Ht_03","Pil_15","Cr_07") 
+TEST_TRAITS    <- c("Ht_07","Ht_10")
 
 EXPECT_NEGATIVE_COR <- FALSE # <--- Set to TRUE if testing Pilodyn against growth traits!
 USE_CORRECTED_DATA  <- FALSE
 
-# --- Auto-Path Logic & Subdirectory Management ---
+# --- Auto-Path Logic & SubdirectoP-datary Management ---
 if(USE_CORRECTED_DATA) {
   WIDE_DATA_CSV <- stringr::str_replace(RAW_WIDE_DATA_CSV, "(?i)\\.csv$", "_Corrected.csv")
   out_suffix <- "_Chained"
@@ -166,6 +166,7 @@ for (TEST_TRAIT in TEST_TRAITS) {
   message(paste("Testing", length(plots), ifelse(PLOT_TYPE=="SINGLE", "blocks", "plots"), "against permutations..."))
   
   for (p in plots) {
+    p_data <- plot_data  # <--- ADD THIS DEFINITION HERE
     plot_data <- working_data %>% filter(Plot == p)
     if(sum(!is.na(plot_data$Base_Val)) < 3 || sum(!is.na(plot_data$Test_Val)) < 3) next
     
