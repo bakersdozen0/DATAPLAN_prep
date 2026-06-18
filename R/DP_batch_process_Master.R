@@ -1,196 +1,83 @@
   
-  library(usethis)
-  library(tidyverse)
-  library(readxl)
-  library(fs)
-  library(gridExtra)
-  library(grid)
-  library(here)
-  library(janitor)
   
-  # =====================================================================
-  # MASTER DATAPLAN PIPELINE CONFIGURATION
-  # =====================================================================
-  PLOT_TYPE     <- "MULTI" # Options: "SINGLE" or "MULTI"
-  # 1. Define the main species folder (Where the Traits Excel file lives)
-  BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Demo2/Scots_Pine"
+# # # # # # # # # # # # # # # # # # # # # # # 
+# PART 0: HELPER FUNCTIONS #### 
+# # # # # # # # # # # # # # # # # # # # # # # 
+# --- 1a. Parse Design File (TXT / No Extension) ---
+parse_long_design_file <- function(filepath, exp_prefix, spp_code) {
+  raw_lines <- readLines(filepath)
+  trt_start <- grep("TREATMENTS", raw_lines)
+  plot_start <- grep("PLOTS", raw_lines)
+  if(length(trt_start) == 0 || length(plot_start) == 0) return(NULL)
   
-  # SS on Teams: 
-  # "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka"
-  # SP on Teams:
-  #"C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Scots_Pine"
+  spp_regex <- paste0("^\\s*", spp_code, "\\s*(\\d+)\\s*", spp_code, "\\s*(.*)$")
+  control_regex <- paste0("^\\*?\\s*", spp_code, "\\s*")
+  prefix_low <- tolower(spp_code)
   
+  trt_lines <- raw_lines[(trt_start + 1):(plot_start - 1)]
+  trt_lines <- trt_lines[grep("=", trt_lines)]
   
-  # 2. Define the specific subfolder containing the trials you want to process today
-  TRIAL_SERIES  <- "Diallel" 
-  ### e.g.: "High GCA Fullsib P85-P87 experiments" / "Backwards Selected Fullsib P96-P99 experiments" / "Trials" (For SP)
-  # (e.g., switch this to "Backwards Selected Fullsib P96-P99 experiments" when needed)
+  trt_df <- tibble(line = trt_lines) %>%
+    mutate(Is_Control = str_detect(str_trim(line), "^\\*")) %>%
+    extract(line, into = c("Design_ID", "Cross_Name"), regex = "^\\s*\\*?\\s*(\\d+)=(.*)$", convert = TRUE) %>%
+    mutate(Cross_Name = str_trim(Cross_Name)) %>%
+    extract(Cross_Name, into = c("Maternal_ID", "Paternal_ID"), regex = spp_regex, remove = FALSE) %>%
+    mutate(
+      Maternal_ID = str_trim(Maternal_ID), Paternal_ID = str_trim(Paternal_ID),
+      Control_Name = if_else(Is_Control, str_trim(str_replace(Cross_Name, control_regex, "")), NA_character_)
+    )
   
-  # 3. The script combines them automatically
-  ROOT_DATA_DIR <- file.path(BASE_DIR, TRIAL_SERIES)
-  # 3. The script combines them automatically
-  ROOT_DATA_DIR <- file.path(BASE_DIR, TRIAL_SERIES)
-  TRAITS_FILE   <- here::here("Trait_trans.csv") # <--- Now points to the Git repo!
-  # =====================================================================
+  plot_lines <- raw_lines[(plot_start + 1):length(raw_lines)]
+  plot_lines <- plot_lines[grep("^[0-9]+,[0-9]+,[0-9]+", plot_lines)]
+  plot_df <- tibble(line = plot_lines) %>%
+    extract(line, into = c("Plot", "Block", "SubBlock", "Design_ID"), regex = "^(\\d+),(\\d+),(\\d+)\\s+(\\d+)", convert = TRUE)
   
-  # # # # # # # # # # # # # # # # # # # # # # # 
-  # PART 0: HELPER FUNCTIONS #### 
-  # # # # # # # # # # # # # # # # # # # # # # # 
-  
-  # --- 1a. Parse Design File (TXT / No Extension) ---
-  parse_long_design_file <- function(filepath, exp_prefix, spp_code) {
-    raw_lines <- readLines(filepath)
-    
-    trt_start <- grep("TREATMENTS", raw_lines)
-    plot_start <- grep("PLOTS", raw_lines)
-    
-    if(length(trt_start) == 0 || length(plot_start) == 0) return(NULL)
-    
-    # Dynamic regex based on Species Code
-    spp_regex <- paste0("^\\s*", spp_code, "\\s*(\\d+)\\s*", spp_code, "\\s*(.*)$")
-    control_regex <- paste0("^\\*?\\s*", spp_code, "\\s*")
-    prefix_low <- tolower(spp_code)
-    
-    # Parse TREATMENTS
-    trt_lines <- raw_lines[(trt_start + 1):(plot_start - 1)]
-    trt_lines <- trt_lines[grep("=", trt_lines)]
-    
-    trt_df <- tibble(line = trt_lines) %>%
-      mutate(Is_Control = str_detect(str_trim(line), "^\\*")) %>%
-      extract(line, into = c("Design_ID", "Cross_Name"), 
-              regex = "^\\s*\\*?\\s*(\\d+)=(.*)$", convert = TRUE) %>%
-      mutate(Cross_Name = str_trim(Cross_Name)) %>%
-      extract(Cross_Name, into = c("Maternal_ID", "Paternal_ID"), regex = spp_regex, remove = FALSE) %>%
-      mutate(
-        Maternal_ID = str_trim(Maternal_ID),
-        Paternal_ID = str_trim(Paternal_ID),
-        Control_Name = if_else(
-          Is_Control,
-          str_trim(str_replace(Cross_Name, control_regex, "")),
-          NA_character_
-        )
+  final_design <- plot_df %>% left_join(trt_df, by = "Design_ID") %>%
+    mutate(
+      Plot = as.numeric(Plot),
+      Family_name = case_when(
+        Design_ID == 0 ~ paste0(exp_prefix, "_Filler"),
+        !is.na(Control_Name) ~ paste0(prefix_low, Control_Name),
+        !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0(prefix_low, Maternal_ID, "_OPCB"),
+        !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0(prefix_low, Maternal_ID, "_", prefix_low, Paternal_ID),
+        TRUE ~ str_replace_all(Cross_Name, "\\s+", "") %>% str_replace(paste0("^", spp_code), paste0(prefix_low, "_"))
       )
-    ) %>%  
-    select(Plot, Block, SubBlock, Family_name)
-  
+    ) %>% select(Plot, Block, SubBlock, Family_name)
   return(final_design)
 }
 
 # --- 1b. Parse Design File (XLSX) ---
 parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
   raw_design <- read_excel(filepath, col_types = "text")
+  if("Rep" %in% names(raw_design) && !"Block" %in% names(raw_design)) raw_design <- raw_design %>% rename(Block = Rep)
   
-  if("Rep" %in% names(raw_design) && !"Block" %in% names(raw_design)) {
-    raw_design <- raw_design %>% rename(Block = Rep)
-  }
-  
-  # THE FIX 1: Inject (?i) to make the regex explicitly CASE-INSENSITIVE
   spp_regex <- paste0("^(?i)\\s*", spp_code, "\\s*(\\d+)\\s*", spp_code, "\\s*(.*)$")
   control_regex <- paste0("^(?i)\\s*", spp_code, "\\s*") 
   prefix_low <- tolower(spp_code)
   
-  clean_design <- raw_design %>%
-    select(any_of(c("Plot", "Block", "Seedlot", "SubBlock"))) %>%
-    filter(!is.na(Plot)) %>%
-    # THE FIX 2: Eradicate all hidden control characters (newlines, tabs) from Excel natively
-    mutate(Seedlot = str_replace_all(Seedlot, "[[:cntrl:]]", "")) %>%
-    mutate(Seedlot = if_else(str_trim(Seedlot) == "", NA_character_, Seedlot)) %>%
+  clean_design <- raw_design %>% select(any_of(c("Plot", "Block", "Seedlot", "SubBlock"))) %>% filter(!is.na(Plot)) %>%
     mutate(
-      Is_Control = str_detect(str_trim(Seedlot), "^\\*"),
-      # THE FIX 3: Bulletproof prefix stripper (ignores newlines, stops exactly at the '=')
-      Clean_Seedlot = str_replace(Seedlot, "^[^=]*=\\s*", "") 
+      Seedlot = str_replace_all(Seedlot, "[[:cntrl:]]", ""), Seedlot = if_else(str_trim(Seedlot) == "", NA_character_, Seedlot),
+      Is_Control = str_detect(str_trim(Seedlot), "^\\*"), Clean_Seedlot = str_replace(Seedlot, "^[^=]*=\\s*", "") 
     ) %>%
     extract(Clean_Seedlot, into = c("Maternal_ID", "Paternal_ID"), regex = spp_regex, remove = FALSE) %>%
     mutate(
-      Plot = suppressWarnings(as.numeric(Plot)),
-      Maternal_ID = str_trim(Maternal_ID),
-      Paternal_ID = str_trim(Paternal_ID),
-      Control_Name = if_else(
-        Is_Control,
-        str_trim(str_replace(Clean_Seedlot, control_regex, "")),
-        NA_character_
-      ),
+      Plot = suppressWarnings(as.numeric(Plot)), Maternal_ID = str_trim(Maternal_ID), Paternal_ID = str_trim(Paternal_ID),
+      Control_Name = if_else(Is_Control, str_trim(str_replace(Clean_Seedlot, control_regex, "")), NA_character_),
       Family_name = case_when(
         !is.na(Control_Name) ~ paste0(prefix_low, Control_Name),
         !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0(prefix_low, Maternal_ID, "_OPCB"),
         !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0(prefix_low, Maternal_ID, "_", prefix_low, Paternal_ID),
-        is.na(Seedlot) ~ paste0(exp_prefix, "_Filler"),
-        TRUE ~ paste0(exp_prefix, "_Filler")
+        is.na(Seedlot) ~ paste0(exp_prefix, "_Filler"), TRUE ~ paste0(exp_prefix, "_Filler")
       )
-    
-    # Join and build Family_name
-    final_design <- plot_df %>%
-      left_join(trt_df, by = "Design_ID") %>%
-      mutate(
-        Plot = as.numeric(Plot),
-        Family_name = case_when(
-          Design_ID == 0 ~ paste0(exp_prefix, "_Filler"),
-          !is.na(Control_Name) ~ paste0(prefix_low, Control_Name),
-          !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0(prefix_low, Maternal_ID, "_OPCB"),
-          !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0(prefix_low, Maternal_ID, "_", prefix_low, Paternal_ID),
-          # Fallback
-          TRUE ~ str_replace_all(Cross_Name, "\\s+", "") %>% str_replace(paste0("^", spp_code), paste0(prefix_low, "_"))
-        )
-      ) %>%  
-      select(Plot, Block, SubBlock, Family_name)
-    
-    return(final_design)
-  }
+    )
+  if(!"SubBlock" %in% names(clean_design)) clean_design$SubBlock <- NA_character_
+  clean_design <- clean_design %>% select(Plot, Block, SubBlock, Family_name)
+  return(clean_design)
+}
   
-  # --- 1b. Parse Design File (XLSX) ---
-  parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
-    raw_design <- read_excel(filepath, col_types = "text")
-    
-    if("Rep" %in% names(raw_design) && !"Block" %in% names(raw_design)) {
-      raw_design <- raw_design %>% rename(Block = Rep)
-    }
-    
-    # THE FIX 1: Inject (?i) to make the regex explicitly CASE-INSENSITIVE
-    spp_regex <- paste0("^(?i)\\s*", spp_code, "\\s*(\\d+)\\s*", spp_code, "\\s*(.*)$")
-    control_regex <- paste0("^(?i)\\s*", spp_code, "\\s*") 
-    prefix_low <- tolower(spp_code)
-    
-    clean_design <- raw_design %>%
-      select(any_of(c("Plot", "Block", "Seedlot", "SubBlock"))) %>%
-      filter(!is.na(Plot)) %>%
-      # THE FIX 2: Eradicate all hidden control characters (newlines, tabs) from Excel natively
-      mutate(Seedlot = str_replace_all(Seedlot, "[[:cntrl:]]", "")) %>%
-      mutate(Seedlot = if_else(str_trim(Seedlot) == "", NA_character_, Seedlot)) %>%
-      mutate(
-        Is_Control = str_detect(str_trim(Seedlot), "^\\*"),
-        # THE FIX 3: Bulletproof prefix stripper (ignores newlines, stops exactly at the '=')
-        Clean_Seedlot = str_replace(Seedlot, "^[^=]*=\\s*", "") 
-      ) %>%
-      extract(Clean_Seedlot, into = c("Maternal_ID", "Paternal_ID"), regex = spp_regex, remove = FALSE) %>%
-      mutate(
-        Plot = suppressWarnings(as.numeric(Plot)),
-        Maternal_ID = str_trim(Maternal_ID),
-        Paternal_ID = str_trim(Paternal_ID),
-        Control_Name = if_else(
-          Is_Control,
-          str_trim(str_replace(Clean_Seedlot, control_regex, "")),
-          NA_character_
-        ),
-        # -------------------------
-        Family_name = case_when(
-          !is.na(Control_Name) ~ paste0(prefix_low, Control_Name),
-          !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0(prefix_low, Maternal_ID, "_OPCB"),
-          !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0(prefix_low, Maternal_ID, "_", prefix_low, Paternal_ID),
-          is.na(Seedlot) ~ paste0(exp_prefix, "_Filler"),
-          TRUE ~ paste0(exp_prefix, "_Filler")
-        )
-      )
-    
-    if(!"SubBlock" %in% names(clean_design)) {
-      clean_design$SubBlock <- NA_character_
-    }
-    
-    clean_design <- clean_design %>% select(Plot, Block, SubBlock, Family_name)
-    return(clean_design)
-  }
-  
-  # --- 1c. Parse CEDD ASCII File (txt) ---
-  parse_cedd_raw_txt <- function(filepath, trait_name, trait_prefix_raw, txt_age) {
+# --- 1c. Parse CEDD ASCII File (txt) ---
+parse_cedd_raw_txt <- function(filepath, trait_name, trait_prefix_raw, txt_age) {
     
     # 1. Read the entire file
     raw_text <- readChar(filepath, file.info(filepath)$size)
@@ -243,8 +130,8 @@ parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
     return(parsed_df)
   }
   
-  # --- 2. PDF Reporting Function ---
-  generate_pdf_report <- function(long_data, wide_data, exp_name, multi_age_prefixes, all_traits) {
+# --- 2. PDF Reporting Function ---
+generate_pdf_report <- function(long_data, wide_data, exp_name, multi_age_prefixes, all_traits) {
     
     all_cont_traits <- long_data %>% filter(Is_Ordinal == FALSE, !str_detect(Trait, "(?i)Sur_")) %>% distinct(Trait) %>% pull(Trait)
     pil_traits  <- all_cont_traits[str_detect(all_cont_traits, "(?i)Pil")]
@@ -430,8 +317,8 @@ parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
     }
   }
   
-  # --- 3. Spatial Matrix Processor ---
-  prowppos <- function(matrix_data) {
+# --- 3. Spatial Matrix Processor ---
+prowppos <- function(matrix_data) {
     data <- list()
     plotchecklist <- c()
     matrix_data <- as.matrix(matrix_data)
@@ -450,8 +337,8 @@ parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
     return(df)
   }
   
-  # --- 4. Map interior tree sequence to full plot sequence ---
-  map_interior_trees <- function(tree_idx, subset_size, full_size) {
+# --- 4. Map interior tree sequence to full plot sequence ---
+map_interior_trees <- function(tree_idx, subset_size, full_size) {
     if (is.na(subset_size) || is.na(full_size) || subset_size == full_size) return(tree_idx)
     n <- sqrt(full_size); m <- sqrt(subset_size)
     if (n %% 1 != 0 || m %% 1 != 0) return(tree_idx)
@@ -462,14 +349,38 @@ parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
     return(mapped_idx)
   }
   
-  # --- 5. Traversal/ Data orientation correction ---
-  get_grid_layout <- function(n_rows, n_cols, interior_only = FALSE) {
+# --- 5. Traversal/ Data orientation correction ---
+get_grid_layout <- function(n_rows, n_cols, interior_only = FALSE) {
     if (n_rows == 1 && n_cols == 8) return(matrix(1:8, nrow=1))
     if (n_rows == 8 && n_cols == 1) return(matrix(1:8, ncol=1))
     
     mat <- matrix(1:(n_rows*n_cols), nrow=n_rows, byrow=TRUE)
     if(interior_only && n_rows >= 3 && n_cols >= 3) mat <- mat[2:(n_rows-1), 2:(n_cols-1)]
     return(mat)
+  }
+
+get_traversal_path <- function(layout_mat, start_corner="top_left", direction="horizontal", snake=FALSE) {
+  if (length(layout_mat) == 8) {
+    if (start_corner %in% c("reversed", "bottom_right")) return(rev(as.vector(layout_mat)))
+    return(as.vector(layout_mat))
+  }
+  n_rows <- nrow(layout_mat); n_cols <- ncol(layout_mat)
+  row_indices <- if (start_corner %in% c("bottom_left", "bottom_right")) rev(seq_len(n_rows)) else seq_len(n_rows)
+  col_indices <- if (start_corner %in% c("top_right", "bottom_right")) rev(seq_len(n_cols)) else seq_len(n_cols)
+  
+  path <- c()
+  if (direction == "horizontal") {
+    for (i_idx in seq_along(row_indices)) {
+      i <- row_indices[i_idx]; cols <- col_indices
+      if (snake && i_idx %% 2 == 0) cols <- rev(cols)
+      for (j in cols) path <- c(path, layout_mat[i, j])
+    }
+  } else {
+    for (j_idx in seq_along(col_indices)) {
+      j <- col_indices[j_idx]; rows <- row_indices
+      if (snake && j_idx %% 2 == 0) rows <- rev(rows)
+      for (i in rows) path <- c(path, layout_mat[i, j])
+    }
   }
   return(path)
 }
@@ -478,73 +389,21 @@ parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
 # PART 1: LOAD TRANSLATION MAP & FOLDERS ####
 # # # # # # # # # # # # # # # # # # # # # # # 
 
-if (file.exists(TRAITS_FILE)) {
-  trait_map <- read_csv(TRAITS_FILE, show_col_types = FALSE) %>%
-    select(trait_code_FR = `Eng Desc`, trait_code_DP = Trait, xml_group = Group, xml_desc_base = Description, xml_units = Units) %>%
-    mutate(across(everything(), as.character)) %>%
-    filter(!is.na(trait_code_FR), !is.na(trait_code_DP)) %>%
-    arrange(desc(nchar(trait_code_FR)))
-} else {
-  stop(paste("Error: Trait translation file not found at:", TRAITS_FILE))
-}
-
-all_dirs <- list.dirs(path = ROOT_DATA_DIR, recursive = FALSE, full.names = FALSE)
-experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", ".Rproj.user"))
-message(paste("Found", length(experiments_to_process), "folders to check."))
-
-# NOTE: Uncomment and set this to run specific folders for testing!
-  experiments_to_process <- c("Brecon 8","Speyside 7")
-
-# # # # # # # # # # # # # # # # # # # # # # # 
-# PART 2: MAIN PROCESSING LOOP ####
-# # # # # # # # # # # # # # # # # # # # # # # 
-
-# Initialize a list to hold correlations for the master summary
-master_correlations_list <- list()
-
-for (curr_exp in experiments_to_process) {
+run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type) {
   
-  get_traversal_path <- function(layout_mat, start_corner="top_left", direction="horizontal", snake=FALSE) {
-    if (length(layout_mat) == 8) {
-      if (start_corner %in% c("reversed", "bottom_right")) return(rev(as.vector(layout_mat)))
-      return(as.vector(layout_mat))
-    }
-    n_rows <- nrow(layout_mat); n_cols <- ncol(layout_mat)
-    row_indices <- if (start_corner %in% c("bottom_left", "bottom_right")) rev(seq_len(n_rows)) else seq_len(n_rows)
-    col_indices <- if (start_corner %in% c("top_right", "bottom_right")) rev(seq_len(n_cols)) else seq_len(n_cols)
-    
-    path <- c()
-    if (direction == "horizontal") {
-      for (i_idx in seq_along(row_indices)) {
-        i <- row_indices[i_idx]; cols <- col_indices
-        if (snake && i_idx %% 2 == 0) cols <- rev(cols)
-        for (j in cols) path <- c(path, layout_mat[i, j])
-      }
-    } else {
-      for (j_idx in seq_along(col_indices)) {
-        j <- col_indices[j_idx]; rows <- row_indices
-        if (snake && j_idx %% 2 == 0) rows <- rev(rows)
-        for (i in rows) path <- c(path, layout_mat[i, j])
-      }
-    }
-    return(path)
-  }
+  root_data_dir <- file.path(base_dir, trial_series)
   
-  # # # # # # # # # # # # # # # # # # # # # # # 
-  # PART 1: LOAD TRANSLATION MAP & FOLDERS ####
-  # # # # # # # # # # # # # # # # # # # # # # # 
-  
-  if (file.exists(TRAITS_FILE)) {
-    trait_map <- read_csv(TRAITS_FILE, show_col_types = FALSE) %>%
+  if (file.exists(traits_file)) {
+    trait_map <- read_csv(traits_file, show_col_types = FALSE) %>%
       select(trait_code_FR = `Eng Desc`, trait_code_DP = Trait, xml_group = Group, xml_desc_base = Description, xml_units = Units) %>%
       mutate(across(everything(), as.character)) %>%
       filter(!is.na(trait_code_FR), !is.na(trait_code_DP)) %>%
       arrange(desc(nchar(trait_code_FR)))
   } else {
-    stop(paste("Error: Trait translation file not found at:", TRAITS_FILE))
+    stop(paste("Error: Trait translation file not found at:", traits_file))
   }
   
-  all_dirs <- list.dirs(path = ROOT_DATA_DIR, recursive = FALSE, full.names = FALSE)
+  all_dirs <- list.dirs(path = root_data_dir, recursive = FALSE, full.names = FALSE)
   experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", ".Rproj.user"))
   message(paste("Found", length(experiments_to_process), "folders to check."))
   
@@ -561,8 +420,8 @@ for (curr_exp in experiments_to_process) {
   for (curr_exp in experiments_to_process) {
     
     tryCatch({
-      message(paste("\n=========================================="))
-      message(paste("Processing Folder:", curr_exp, "| Mode:", PLOT_TYPE))
+      message(paste("\n=========================================="))  
+      message(paste("Processing Folder:", curr_exp, "| Mode:", plot_type))
       
       exp_path <- file.path(ROOT_DATA_DIR, curr_exp)
       file_prefix <- str_replace_all(curr_exp, " ", "_")
@@ -722,10 +581,10 @@ for (curr_exp in experiments_to_process) {
       # 
       # THE MASTER "TREE ID" INJECTION 
       # 
-      if (PLOT_TYPE == "SINGLE") {
+      if (plot_type == "SINGLE") {
         # Single-Tree: Force every record to be Tree 1
         raw_data <- raw_data %>% mutate(InferredTreePosition = 1)
-      } else if (PLOT_TYPE == "MULTI") {
+      } else if (plot_type == "MULTI") {
         if ("inferred_tree_position" %in% names(raw_data)) {
           raw_data <- raw_data %>% rename(InferredTreePosition = inferred_tree_position)
         } else {
@@ -763,7 +622,7 @@ for (curr_exp in experiments_to_process) {
         )
       
       # Map Trees (Bypass for Single-Tree)
-      if(PLOT_TYPE == "MULTI") {
+      if(plot_type == "MULTI") {
         exp_data_long <- exp_data_long %>%
           group_by(Plot) %>% mutate(Max_Trees_Planted = max(Tree_Orig_Num, na.rm = TRUE)) %>% 
           group_by(Plot, Trait_Orig) %>% mutate(Trees_in_Subset = max(Tree_Orig_Num, na.rm = TRUE), Tree = purrr::pmap_dbl(list(Tree_Orig_Num, Trees_in_Subset, Max_Trees_Planted), map_interior_trees)) %>%
@@ -874,7 +733,7 @@ for (curr_exp in experiments_to_process) {
       # =====================================================================
       applied_corrections <- FALSE
       
-      if(PLOT_TYPE == "MULTI") {
+      if(plot_type == "MULTI") {
         helper_path <- file.path(exp_path, "TRAVERSAL_HELPER_MASTER.csv")
         exp_mirror_flags <- tibble(Plot = character(), Tree = numeric(), Mirror_Flag = character())
         
@@ -937,7 +796,7 @@ for (curr_exp in experiments_to_process) {
           message("   -> No TRAVERSAL_HELPER found. Using standard orientation.")
         }
       } else {
-        # If PLOT_TYPE is SINGLE, we skip traversal logic entirely
+        # If plot_type is SINGLE, we skip traversal logic entirely
         exp_mirror_flags <- tibble(Plot = character(), Tree = numeric(), Mirror_Flag = character())
       }
       
@@ -1108,3 +967,6 @@ for (curr_exp in experiments_to_process) {
     message("  -> No correlation data found across any trials to compile.")
   }
   message("==========================================\n")
+  
+}
+}

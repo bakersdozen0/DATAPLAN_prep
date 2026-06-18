@@ -1,56 +1,26 @@
 # =====================================================================
 # MASTER PEDIGREE PIPELINE CONFIGURATION
 # =====================================================================
-
-# 1. Base Paths & Species Identifiers
-BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Demo2/Scots_Pine"
-
-SPECIES_CODE  <- "SP"         # Options: "SS" or "SP"
-SPECIES_NAME  <- "CBCScots"   # Options: "CBCSitka" or "CBCScots"
-
-# 2. Input File Names (Dynamically structured)
-FOUNDERS_FILE <- paste0(SPECIES_CODE, "_tibdb_clones.csv") 
-CONTROLS_FILE <- "dataplan_family_control_import.csv" 
-OP_FAM_FILE   <- paste0(SPECIES_CODE, "_OP_Families.xlsx")
-
-# 3. Directories containing the pending trial data and existing live DB exports
-PENDING_DIR   <- file.path(BASE_DIR, "Diallel")
-
-# 4. Database Toggle 
-# Set to FALSE if this is the first tranche and there is no DB to filter against.
-HAS_EXISTING_DB <- FALSE
-EXISTING_DIR  <- file.path(BASE_DIR, "Backwards Selected Fullsib P96-P99 experiments")
-
-# =====================================================================
-
-library(tidyverse)
-library(readxl)
-library(fs)
-library(janitor)
-library(here)
-library(purrr)
-library(stringr)
-library(igraph)
-library(ggraph)
-
+run_pedigree_builder <- function(base_dir, pending_dir, existing_dir, species_code, species_name, founders_file, controls_file, op_fam_file, has_existing_db) {
+  
 cat("\n==========================================")
-cat("\nBuilding Pedigree For:", SPECIES_NAME)
+cat("\nBuilding Pedigree For:", species_name)
 cat("\n==========================================\n")
 
 # --- 1. LOAD FOUNDERS, CONTROLS, AND OP FAMILIES ---
-prefix_low <- tolower(SPECIES_CODE)
+prefix_low <- tolower(species_code)
 
 # 1. Load Founders and force headers to lowercase, then fix the specific ones the script needs
-founders <- read_csv(file.path(BASE_DIR, "Pedigree", FOUNDERS_FILE), show_col_types = FALSE) %>%
+founders <- read_csv(file.path(base_dir, "Pedigree", founders_file), show_col_types = FALSE) %>%
   janitor::clean_names() %>% 
   rename(LOCAT = locat, GEN = gen, PYR = pyr) %>% # Forces these critical columns to uppercase for the script
   mutate(Genotype_name = paste0(prefix_low, number))
 
 # 2. Load Controls
-controls <- read_csv(file.path(BASE_DIR, "Pedigree", CONTROLS_FILE), show_col_types = FALSE)
+controls <- read_csv(file.path(base_dir, "Pedigree", controls_file), show_col_types = FALSE)
 
 # 3. Load OP Families and force headers to standard snake_case
-op_families <- read_excel(file.path(BASE_DIR, "Pedigree", OP_FAM_FILE)) %>% 
+op_families <- read_excel(file.path(base_dir, "Pedigree", op_fam_file)) %>% 
   janitor::clean_names() %>% 
   mutate(across(everything(), as.character)) %>% # <--- THE BLANK TEMPLATE NUKE! Forces all empty columns to Text.
   rename(
@@ -185,19 +155,19 @@ build_pedigree <- function(target_dir, founders, controls, op_families, species_
 
 # --- 3. GENERATE RAW PENDING TABLES ---
 pending_tables <- build_pedigree(
-  target_dir = PENDING_DIR, 
+  target_dir = pending_dir, 
   founders = founders, 
   controls = controls, 
   op_families = op_families,
-  species_name = SPECIES_NAME
+  species_name = species_name
 )
 # --- 4. LOAD EXISTING DATABASE EXPORTS (WITH TOGGLE) ---
-if (HAS_EXISTING_DB) {
+if (has_existing_db) {
   cat("\nLoading Existing Database Exports...\n")
   
-  db_fams   <- read_excel(file.path(EXISTING_DIR, "DMS_all_fams.xlsx"))
-  db_genos  <- read_excel(file.path(EXISTING_DIR, "DMS_all_genotypes.xlsx"))
-  db_groups <- read_excel(file.path(EXISTING_DIR, "DMS_Groups.xlsx"))
+  db_fams   <- read_excel(file.path(existing_dir, "DMS_all_fams.xlsx"))
+  db_genos  <- read_excel(file.path(existing_dir, "DMS_all_genotypes.xlsx"))
+  db_groups <- read_excel(file.path(existing_dir, "DMS_Groups.xlsx"))
   
   # Extract clean vectors of names currently in the database
   db_fam_list   <- db_fams[[grep("(?i)family.*name", names(db_fams), value = TRUE)[1]]]
@@ -266,9 +236,9 @@ if(length(orphans_I) == 0 && length(orphans_G) == 0) {
 }
 
 # --- 7. EXPORT VERIFIED FILES ---
-write_csv(true_groups_export, file.path(BASE_DIR, "Pedigree", paste0("Verified_", SPECIES_CODE, "_Groups_Import.csv")))
-write_csv(true_genotypes_export, file.path(BASE_DIR, "Pedigree", paste0("Verified_", SPECIES_CODE, "_Genotypes_Import.csv")))
-write_csv(true_families_export, file.path(BASE_DIR, "Pedigree", paste0("Verified_", SPECIES_CODE, "_Families_Import.csv")))
+write_csv(true_groups_export, file.path(base_dir, "Pedigree", paste0("Verified_", species_code, "_Groups_Import.csv")))
+write_csv(true_genotypes_export, file.path(base_dir, "Pedigree", paste0("Verified_", species_code, "_Genotypes_Import.csv")))
+write_csv(true_families_export, file.path(base_dir, "Pedigree", paste0("Verified_", species_code, "_Families_Import.csv")))
 
 # --- 8. GENERATE COMPLETE FAMILIES ORIGIN FILE ---
 cat("\n--- CALCULATING COMPLETE FAMILY ORIGINS (MACRO-REGIONS & OPCB) ---\n")
@@ -325,7 +295,6 @@ for(ro in all_unique_ros) {
     )
 }
 
-library(dplyr)
 
 #### Diagnostic Investigation: Ro_north_unk Contributors
 # Filter and categorize the sources of the North_Unk designation
@@ -356,13 +325,10 @@ families_origin_export <- ro_families %>%
   select(Family_name, starts_with("Ro_")) %>%
   mutate(across(starts_with("Ro_"), ~replace_na(.x, 0)))
 
-write_csv(families_origin_export, file.path(BASE_DIR, "Pedigree", paste0("Complete_", SPECIES_CODE, "_Families_Origin.csv")))
+write_csv(families_origin_export, file.path(base_dir, "Pedigree", paste0("Complete_", species_code, "_Families_Origin.csv")))
 
 cat("Generated mathematically complete origins for", nrow(families_origin_export), "families.\n")
 
-
-library(dplyr)
-library(readr)
 
 # Extract the specific families with North_Unk for manual review
 families_to_review <- ro_families %>%
@@ -391,7 +357,7 @@ print(families_to_review, n = 20)
 # Export to a CSV for your colleagues
 write_csv(
   families_to_review, 
-  file.path(BASE_DIR, "Pedigree", "HighGCA_Unknown_Origins_Review.csv")
+  file.path(base_dir, "Pedigree", "HighGCA_Unknown_Origins_Review.csv")
 )
 
 cat("\nExported", nrow(families_to_review), "families to 'HighGCA_Unknown_Origins_Review.csv'\n")
@@ -404,9 +370,9 @@ cat("\n==========================================\n")
 # PLOT 1: VERIFIED PENDING PEDIGREE ONLY   ####
 # # # # # # # # # # # # # # # # # # # # # # # #
 
-families  <- read_csv(file.path(BASE_DIR,"Pedigree", paste0("Verified_", SPECIES_CODE, "_Families_Import.csv")), show_col_types = FALSE)
-genotypes <- read_csv(file.path(BASE_DIR,"Pedigree", paste0("Verified_", SPECIES_CODE, "_Genotypes_Import.csv")), show_col_types = FALSE)
-groups    <- read_csv(file.path(BASE_DIR,"Pedigree", paste0("Verified_", SPECIES_CODE, "_Groups_Import.csv")), show_col_types = FALSE)
+families  <- read_csv(file.path(base_dir,"Pedigree", paste0("Verified_", species_code, "_Families_Import.csv")), show_col_types = FALSE)
+genotypes <- read_csv(file.path(base_dir,"Pedigree", paste0("Verified_", species_code, "_Genotypes_Import.csv")), show_col_types = FALSE)
+groups    <- read_csv(file.path(base_dir,"Pedigree", paste0("Verified_", species_code, "_Groups_Import.csv")), show_col_types = FALSE)
 
 crosses <- families %>% filter(Stage == 4, Mum_name != "Unknown", Dad_name != "Unknown")
 edges_mum <- crosses %>% select(from = Mum_name, to = Family_name)
@@ -444,7 +410,7 @@ p1 <- ggraph(pedigree_graph, layout = 'sugiyama') +
     values = c("1. Origin" = "#E41A1C", "2. Group" = "#377EB8", "3. Genotype (Parent)" = "#4DAF4A", "4. Family (Offspring)" = "#984EA3"),
     name = "Pedigree Level"
   ) +
-  labs(title = paste("Verified", SPECIES_CODE, "Pending Pedigree Network"), subtitle = "Ready for Upload")
+  labs(title = paste("Verified", species_code, "Pending Pedigree Network"), subtitle = "Ready for Upload")
 
 print(p1)
 
@@ -511,6 +477,8 @@ p2 <- ggraph(pedigree_graph_all, layout = 'sugiyama') +
     values = c("1. Origin" = "#E41A1C", "2. Group" = "#377EB8", "3. Genotype (Parent)" = "#4DAF4A", "4. Family (Offspring)" = "#984EA3"),
     name = "Pedigree Level"
   ) +
-  labs(title = paste("Complete", SPECIES_CODE, "Pedigree Network"), subtitle = "Existing Database + Target Extract")
+  labs(title = paste("Complete", species_code, "Pedigree Network"), subtitle = "Existing Database + Target Extract")
 
 print(p2)
+
+}
