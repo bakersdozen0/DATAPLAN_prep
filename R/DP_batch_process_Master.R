@@ -385,7 +385,6 @@ get_traversal_path <- function(layout_mat, start_corner="top_left", direction="h
   return(path)
 }
 
-
 # # # # # # # # # # # # # # # # # # # # # # # 
 # PART 1: LOAD TRANSLATION MAP & FOLDERS ####
 # # # # # # # # # # # # # # # # # # # # # # # 
