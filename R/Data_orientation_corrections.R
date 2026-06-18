@@ -1,68 +1,7 @@
 # ============================================================================
 # DIAGNOSTIC TOOL: BATCH PLOT TRAVERSAL AUDIT (Single & Multi-Tree Compatible)
 # ============================================================================
-library(tidyverse)
-library(fs)
 
-# ============================================================================
-#### 1. USER CONFIGURATION ####
-# ============================================================================
-RAW_WIDE_DATA_CSV <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka/High GCA Fullsib P85-P87 experiments/Craigellachie 49/Craigellachie_49_Full_Data_With_Flags.csv"
-
-PLOT_TYPE      <- "MULTI"  # Options: "SINGLE" (evaluates Plot sequence within Blocks) or "MULTI" (Trees within Plots)
-
-# FALLBACK GRID DIMENSIONS (Used only if spatial Prow/Ppos are missing from the data)
-GRID_ROWS      <- 8
-GRID_COLS      <- 1
-
-BASELINE_TRAIT <- "Ht_06" 
-TEST_TRAITS    <- c("Dm_10","Ht_10","Pil_15","Dm_15","Cr_07") 
-
-EXPECT_NEGATIVE_COR <- FALSE # <--- Set to TRUE if expecting negative correlations among traits!
-USE_CORRECTED_DATA  <- FALSE
-
-# --- Auto-Path Logic & SubdirectoP-datary Management ---
-if(USE_CORRECTED_DATA) {
-  WIDE_DATA_CSV <- stringr::str_replace(RAW_WIDE_DATA_CSV, "(?i)\\.csv$", "_Corrected.csv")
-  out_suffix <- "_Chained"
-} else {
-  WIDE_DATA_CSV <- RAW_WIDE_DATA_CSV
-  out_suffix <- ""
-}
-
-OUTPUT_DIR <- dirname(WIDE_DATA_CSV)
-DIAG_DIR   <- file.path(OUTPUT_DIR, "Traversal_Diagnostics")
-if(!dir.exists(DIAG_DIR)) dir.create(DIAG_DIR)
-
-helper_path <- file.path(OUTPUT_DIR, "TRAVERSAL_HELPER_MASTER.csv")
-if (USE_CORRECTED_DATA && file.exists(helper_path)) {
-  backup_name <- paste0("TRAVERSAL_HELPER_MASTER_PreChainBackup_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
-  file.copy(helper_path, file.path(DIAG_DIR, backup_name))
-  message(paste("Backed up original Master Helper to:", backup_name))
-}
-
-# --- CHAINING SAFEGUARD (Anti-Double-Scramble) ---
-if (USE_CORRECTED_DATA && file.exists(helper_path)) {
-  existing_helper <- suppressMessages(read_csv(helper_path, show_col_types = FALSE))
-  conflict_traits <- intersect(TEST_TRAITS, existing_helper$Trait_ID)
-  
-  if (length(conflict_traits) > 0) {
-    message("\n======================================================================")
-    message("🛑 CRITICAL ERROR: CHAINING SAFEGUARD TRIGGERED 🛑")
-    message("======================================================================")
-    message(sprintf("You are trying to run a Temporal Chain on: %s", paste(conflict_traits, collapse = ", ")))
-    message("However, these traits ALREADY have rules in the Master Helper!")
-    message("If you proceed, you will calculate a 'Relative Path' and double-scramble your data.\n")
-    message("HOW TO FIX THIS:")
-    message(sprintf("  1. Open %s", helper_path))
-    message(sprintf("  2. Delete all rows where Trait_ID is %s", paste(conflict_traits, collapse = " or ")))
-    message("  3. Save and close the Helper.")
-    message("  4. Run your Main Pipeline (DP_batch_process_Master.R) to bake a clean '_Corrected.csv'.")
-    message("  5. Come back and run this diagnostic again.")
-    message("======================================================================\n")
-    stop("Diagnostic aborted to prevent Double-Scrambling.")
-  }
-}
 
 # ============================================================================
 #### 2. VIRTUAL ASSESSOR MATH ENGINE ####
@@ -104,11 +43,52 @@ get_traversal_path <- function(layout_mat, start_corner="top_left", direction="h
 # ============================================================================
 #### 3. BATCH PROCESSING LOOP ####
 # ============================================================================
-message(paste("Loading master data from:", basename(WIDE_DATA_CSV)))
-df_raw <- read_csv(WIDE_DATA_CSV, show_col_types = FALSE)
+message(paste("Loading master data from:", basename(wide_data_csv)))
+
+run_traversal_audit <- function(wide_data_csv, plot_type, baseline_trait, test_traits, grid_rows = 8, grid_cols = 1, expect_negative_cor = FALSE, use_corrected_data = FALSE) {
+  
+  out_suffix <- if (use_corrected_data) "_Corrected" else ""
+  
+  OUTPUT_DIR <- dirname(wide_data_csv)
+  DIAG_DIR   <- file.path(OUTPUT_DIR, "Traversal_Diagnostics")
+  if(!dir.exists(DIAG_DIR)) dir.create(DIAG_DIR)
+  
+  helper_path <- file.path(OUTPUT_DIR, "TRAVERSAL_HELPER_MASTER.csv")
+  if (use_corrected_data && file.exists(helper_path)) {
+    backup_name <- paste0("TRAVERSAL_HELPER_MASTER_PreChainBackup_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
+    file.copy(helper_path, file.path(DIAG_DIR, backup_name))
+    message(paste("Backed up original Master Helper to:", backup_name))
+  }
+  
+  # --- CHAINING SAFEGUARD (Anti-Double-Scramble) ---
+  if (use_corrected_data && file.exists(helper_path)) {
+    existing_helper <- suppressMessages(read_csv(helper_path, show_col_types = FALSE))
+    conflict_traits <- intersect(test_traits, existing_helper$Trait_ID)
+    
+    if (length(conflict_traits) > 0) {
+      message("\n======================================================================")
+      message("🛑 CRITICAL ERROR: CHAINING SAFEGUARD TRIGGERED 🛑")
+      message("======================================================================")
+      message(sprintf("You are trying to run a Temporal Chain on: %s", paste(conflict_traits, collapse = ", ")))
+      message("However, these traits ALREADY have rules in the Master Helper!")
+      message("If you proceed, you will calculate a 'Relative Path' and double-scramble your data.\n")
+      message("HOW TO FIX THIS:")
+      message(sprintf("  1. Open %s", helper_path))
+      message(sprintf("  2. Delete all rows where Trait_ID is %s", paste(conflict_traits, collapse = " or ")))
+      message("  3. Save and close the Helper.")
+      message("  4. Run your Main Pipeline (DP_batch_process_Master.R) to bake a clean '_Corrected.csv'.")
+      message("  5. Come back and run this diagnostic again.")
+      message("======================================================================\n")
+      stop("Diagnostic aborted to prevent Double-Scrambling.")
+    }
+  }
+  
+
+  
+  df_raw <- read_csv(wide_data_csv, show_col_types = FALSE)
 
 # ALIASING ENGINE
-if (PLOT_TYPE == "SINGLE") {
+if (plot_type == "SINGLE") {
   if (!"Block" %in% names(df_raw)) stop("CRITICAL ERROR: 'Block' column required.")
   message(">> RUNNING IN SINGLE-TREE MODE: Evaluating Plot sequences within Blocks.")
   df_raw <- df_raw %>%
@@ -133,13 +113,13 @@ if (has_standard || has_p_coords) {
     filter(!is.na(Map_Row) & !is.na(Map_Pos))
 }
 
-for (TEST_TRAIT in TEST_TRAITS) {
+for (TEST_TRAIT in test_traits) {
   cat("\n======================================================================\n")
   cat(">>> INITIATING DIAGNOSTIC FOR TRAIT:", TEST_TRAIT, "<<<\n")
   cat("======================================================================\n")
   
   # --- Auto-Detect Survival ---
-  base_age <- suppressWarnings(as.numeric(str_extract(BASELINE_TRAIT, "\\d+")))
+  base_age <- suppressWarnings(as.numeric(str_extract(baseline_trait, "\\d+")))
   target_surv_base <- paste0("Sur_", str_pad(base_age, 2, pad = "0"))
   if (target_surv_base %in% names(df_raw)) BASELINE_SURV <- target_surv_base else {
     surv_cols <- grep("(?i)^Sur_", names(df_raw), value = TRUE)
@@ -154,7 +134,7 @@ for (TEST_TRAIT in TEST_TRAITS) {
   }
   
   working_data <- df_raw %>%
-    select(Plot, Tree, Base_Val = !!sym(BASELINE_TRAIT), Base_Surv = !!sym(BASELINE_SURV), Test_Val = !!sym(TEST_TRAIT), Test_Surv = !!sym(TEST_SURV)) %>%
+    select(Plot, Tree, Base_Val = !!sym(baseline_trait), Base_Surv = !!sym(BASELINE_SURV), Test_Val = !!sym(TEST_TRAIT), Test_Surv = !!sym(TEST_SURV)) %>%
     #filter(!str_detect(Plot, "(?i)Filler")) %>%
     mutate(Tree = as.numeric(Tree), Plot = as.character(Plot), Base_Val = na_if(as.numeric(Base_Val), 0), Test_Val = na_if(as.numeric(Test_Val), 0))
   
@@ -163,15 +143,14 @@ for (TEST_TRAIT in TEST_TRAITS) {
   plots <- unique(working_data$Plot)
   results_list <- list()
   
-  message(paste("Testing", length(plots), ifelse(PLOT_TYPE=="SINGLE", "blocks", "plots"), "against permutations..."))
+  message(paste("Testing", length(plots), ifelse(plot_type=="SINGLE", "blocks", "plots"), "against permutations..."))
   
   for (p in plots) {
-    p_data <- plot_data  # <--- ADD THIS DEFINITION HERE
     plot_data <- working_data %>% filter(Plot == p)
     if(sum(!is.na(plot_data$Base_Val)) < 3 || sum(!is.na(plot_data$Test_Val)) < 3) next
     
     # --- DYNAMIC GRID RESIZING ---
-    p_rows <- GRID_ROWS; p_cols <- GRID_COLS
+    p_rows <- grid_rows; p_cols <- grid_cols
     if (exists("plot_spatial_trees")) {
       sp_data <- plot_spatial_trees %>% filter(Plot == p)
       if(nrow(sp_data) > 0) {
@@ -214,11 +193,11 @@ for (TEST_TRAIT in TEST_TRAITS) {
     group_by(Plot) %>%
     mutate(Normal_Cor = Spearman_Cor[start_corner %in% c("top_left", "normal") & direction == "horizontal" & snake == FALSE]) %>%
     filter(Zombies_Created == min(Zombies_Created)) %>% 
-    arrange(if(EXPECT_NEGATIVE_COR) Spearman_Cor else desc(Spearman_Cor)) %>% 
+    arrange(if(expect_negative_cor) Spearman_Cor else desc(Spearman_Cor)) %>% 
     slice(1) %>% 
     ungroup() %>%
     mutate(
-      Cor_Diff = if(EXPECT_NEGATIVE_COR) (Normal_Cor - Spearman_Cor) else (Spearman_Cor - Normal_Cor),
+      Cor_Diff = if(expect_negative_cor) (Normal_Cor - Spearman_Cor) else (Spearman_Cor - Normal_Cor),
       Action_Required = case_when(
         start_corner %in% c("top_left", "normal") & direction == "horizontal" & snake == FALSE ~ "None (Normal is Best)",
         Zombies_Created > 0 ~ paste("FIX w/ WARNING:", Zombies_Created, "Zombies remain"),
@@ -260,8 +239,8 @@ for (TEST_TRAIT in TEST_TRAITS) {
       arrange(desc(Action_Required))
   }
   
-  write_csv(all_results, file.path(DIAG_DIR, paste0(BASELINE_TRAIT, "_vs_", TEST_TRAIT, out_suffix, "_All_Permutations.csv")))
-  write_csv(recommendations, file.path(DIAG_DIR, paste0("Suggested_Fixes_", TEST_TRAIT, "_anchored_to_", BASELINE_TRAIT, out_suffix, ".csv")))
+  write_csv(all_results, file.path(DIAG_DIR, paste0(baseline_trait, "_vs_", TEST_TRAIT, out_suffix, "_All_Permutations.csv")))
+  write_csv(recommendations, file.path(DIAG_DIR, paste0("Suggested_Fixes_", TEST_TRAIT, "_anchored_to_", baseline_trait, out_suffix, ".csv")))
   
   # --- VISUALIZATION BLOCK ---
   message("Generating visualization panels...")
@@ -275,7 +254,7 @@ for (TEST_TRAIT in TEST_TRAITS) {
       rec <- original_recs %>% filter(Plot == p) # Pulls from original_recs, not recommendations
       
       if (nrow(rec) == 1 && str_detect(rec$Action_Required, "(?i)FIX")) {
-        p_rows <- GRID_ROWS; p_cols <- GRID_COLS
+        p_rows <- grid_rows; p_cols <- grid_cols
         if (exists("plot_spatial_trees")) {
           sp_data <- plot_spatial_trees %>% filter(Plot == p)
           if(nrow(sp_data) > 0) { p_rows <- max(sp_data$Map_Row) - min(sp_data$Map_Row) + 1; p_cols <- max(sp_data$Map_Pos) - min(sp_data$Map_Pos) + 1 }
@@ -308,7 +287,7 @@ for (TEST_TRAIT in TEST_TRAITS) {
     rec <- recommendations %>% filter(Plot == p)
     if (nrow(rec) == 1 && !str_detect(rec$Action_Required, "(?i)None")) {
       
-      p_rows <- GRID_ROWS; p_cols <- GRID_COLS
+      p_rows <- grid_rows; p_cols <- grid_cols
       if (exists("plot_spatial_trees")) {
         sp_data <- plot_spatial_trees %>% filter(Plot == p)
         if(nrow(sp_data) > 0) { p_rows <- max(sp_data$Map_Row) - min(sp_data$Map_Row) + 1; p_cols <- max(sp_data$Map_Pos) - min(sp_data$Map_Pos) + 1 }
@@ -355,11 +334,11 @@ for (TEST_TRAIT in TEST_TRAITS) {
     geom_point(alpha = 0.5, size=0.25, color = "#2c3e50") +
     geom_smooth(method = "lm", formula = y ~ x, color = "#e74c3c", linetype = "dashed", se = FALSE) +
     facet_wrap(~State, ncol = 2) + theme_bw() +
-    labs(title = paste("Plot Traversal Correction:", BASELINE_TRAIT, "vs", TEST_TRAIT), 
+    labs(title = paste("Plot Traversal Correction:", baseline_trait, "vs", TEST_TRAIT), 
          subtitle = subtitle_text, 
-         x = paste("Trusted Baseline:", BASELINE_TRAIT), y = paste("Suspected Trait:", TEST_TRAIT))
+         x = paste("Trusted Baseline:", baseline_trait), y = paste("Suspected Trait:", TEST_TRAIT))
   
-  ggsave(file.path(DIAG_DIR, paste0(BASELINE_TRAIT, "_vs_", TEST_TRAIT, out_suffix, "_Correction_Plot.png")), plot = p_compare, width = 12, height = 6, dpi = 300)
+  ggsave(file.path(DIAG_DIR, paste0(baseline_trait, "_vs_", TEST_TRAIT, out_suffix, "_Correction_Plot.png")), plot = p_compare, width = 12, height = 6, dpi = 300)
   
   # --- Field Spatial Map of Traversal Patterns ---
   if (exists("plot_spatial_trees") && nrow(recommendations %>% filter(str_detect(Action_Required, "FIX|OVERRIDE"))) > 0) {
@@ -417,10 +396,10 @@ for (TEST_TRAIT in TEST_TRAITS) {
         geom_text(data = map_df, aes(x = Centroid_Pos, y = Centroid_Row, label = Plot), size = 4, color = "black", fontface = "bold") +
         geom_path(data = path_df, aes(x = X, y = Y, color = Path_Type, group = Plot), arrow = arrow(length = unit(0.08, "inches"), type = "closed"), linewidth = 0.6) +
         scale_y_reverse() + scale_color_manual(values = my_colors) + theme_minimal() +
-        labs(title = paste("Field Traversal Map:", TEST_TRAIT, "anchored to", BASELINE_TRAIT), x = "Field Position (X)", y = "Field Row (Y)") +
+        labs(title = paste("Field Traversal Map:", TEST_TRAIT, "anchored to", baseline_trait), x = "Field Position (X)", y = "Field Row (Y)") +
         theme(legend.position = "bottom", legend.title = element_blank(), panel.grid.major = element_line(color = "grey95"), panel.grid.minor = element_blank(), plot.title = element_text(face = "bold", size = 16))
       
-      ggsave(file.path(DIAG_DIR, paste0(BASELINE_TRAIT, "_vs_", TEST_TRAIT, out_suffix, "_Spatial_Map.png")), plot = p_map, width = 16, height = 10, dpi = 300)
+      ggsave(file.path(DIAG_DIR, paste0(baseline_trait, "_vs_", TEST_TRAIT, out_suffix, "_Spatial_Map.png")), plot = p_map, width = 16, height = 10, dpi = 300)
     }
   }
   
@@ -428,7 +407,7 @@ for (TEST_TRAIT in TEST_TRAITS) {
   fixes_to_apply <- recommendations %>% filter(str_detect(Action_Required, "FIX|OVERRIDE"))
   if (nrow(fixes_to_apply) > 0) {
     main_pipe_helper <- fixes_to_apply %>%
-      mutate(Trial_ID = basename(OUTPUT_DIR), Trait_ID = TEST_TRAIT, Anchor_Used = BASELINE_TRAIT, Manual_Verification = "Pending", Best_Snake = as.character(Best_Snake), Plot = if (PLOT_TYPE == "SINGLE") paste0("Block_", Plot) else as.character(Plot)) %>%
+      mutate(Trial_ID = basename(OUTPUT_DIR), Trait_ID = TEST_TRAIT, Anchor_Used = baseline_trait, Manual_Verification = "Pending", Best_Snake = as.character(Best_Snake), Plot = if (plot_type == "SINGLE") paste0("Block_", Plot) else as.character(Plot)) %>%
       select(Trial_ID, Trait_ID, Anchor_Used, Plot, Best_Start, Best_Dir, Best_Snake, Best_Cor, Normal_Cor)
     helper_path <- file.path(OUTPUT_DIR, "TRAVERSAL_HELPER_MASTER.csv")
     if (file.exists(helper_path)) {
@@ -440,3 +419,5 @@ for (TEST_TRAIT in TEST_TRAITS) {
   } else { message("No fixes required. Master Integration Helper unchanged.\n") }
 }
 cat(">>> BATCH DIAGNOSTIC COMPLETE <<<\n")
+
+}
