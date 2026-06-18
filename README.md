@@ -10,55 +10,38 @@ This project uses a **hybrid file architecture**:
 1. **The Code:** Lives locally on your `C:` drive (managed via this GitHub repository).
 2. **The Data:** Lives externally on the shared network drive (`Z:`) or synced Teams/SharePoint folders.
 
-**Do NOT copy raw data (`.csv`, `.xlsx`, `.txt`) into this local repository.** To run these scripts, you must define the `BASE_DIR` and `TRIAL_SERIES` path variables at the top of the scripts to point to your local data location.
+**Do NOT copy raw data (`.csv`, `.xlsx`, `.txt`) into this local repository.** To run these scripts, you must define the `BASE_DIR`, `TRIAL_SERIES`, and other specific parameters in the `USER CONFIGURATION` block of `Master_Engine.R`.
 
 ---
 
-## Core Scripts
+## 🏗️ The "Wheel and Engine" Architecture
 
-### 1. The Master Script (`DP_batch_process_Master.R`)
-The core execution engine, refactored to handle complex corrections and standardizations. 
-* **Primary Inputs:** Designed primarily to ingest PowerBI export ASCII (long-format) files produced by RT.
-* **Fallback Ingestion:** Automatically sweeps for Additional Data (`_AD_<age>.csv/xlsx`) or raw text files (e.g., `Ht_06.txt`) to capture data missing from the CEDD database or accidentally omitted from the ASCII export.
-* **Surgical ID Re-alignment:** Automatically detects the presence of a `TRAVERSAL_HELPER_MASTER.csv`. It "un-scrambles" the Tree IDs for specific plots and traits in-memory, stamping the fix and the anchor used into the final validation record.
-* **Global Zero-Padding:** Automatically enforces leading zeros on all assessment ages (e.g., `Ht_3` becomes `Ht_03`). This ensures trait names match flawlessly across all data sources.
-* **Hardcoded Edge Cases:** Contains logic for massive trial-level intercepts (e.g., the Kielder 162 global left-to-right mirror hotfix) that bypass standard plot-level logic.
+This pipeline is structured into a Control Center (The Wheel) and modular processing scripts (The Engines). **Future users should only ever open and interact with `Master_Engine.R`.**
 
-### 2. Traversal Diagnostic & Orientation Tool (`Data_orientation_corrections.R`)
-This tool is used *after* an initial run of the Master Script. Discrepancies in expected inter-age or inter-trait correlations (typically visible as notable left-skewing in the `.pdf` correlation plots, such as `Ht_05` vs `Dm_15`) are investigated here. 
+### 1. The Control Center: `Master_Engine.R`
+This is the single entry point for the entire pipeline. Users set their global paths, database toggles, and trial specifications here. Once configured, you simply highlight and run the specific Execution Blocks you need. It automatically sources the required Engine files in the background.
 
-This code scans and corrects instances of human error in spatial data entry:
-* **16-Way Brute Force:** Simulates all 16 possible physical traversal paths (Starting corners, Horizontal/Vertical, Typewriter/Snake) and finds the one that maximizes biological correlation against a trusted anchor.
-* **Inverse Logic (Negative Correlations):** Includes an `EXPECT_NEGATIVE_COR` toggle to hunt for paths that maximize *negative* correlations, which is essential when anchoring density traits (like Pilodyn) against growth traits.
-* **Global Consensus Override:** If >60% of plots in a trial suggest the exact same spatial fix, the script overrides plot-level filtering and applies the fix globally to the entire trial.
-* **Temporal Chaining & Safeguards:** Supports iterative cleaning (using a corrected trait as a "stepping stone" to fix another). *Note: Chaining is speculative. It is highly effective for square/rectangular multi-tree plots where 16 distinct paths exist, but it relies heavily on visually identifying consistent assessor error patterns and should ideally be anchored to one or more manually verified traits.*
-    * **Anti-Double-Scramble:** Includes a critical safety catch. If you attempt to chain a fix on a trait that already has a rule in the helper file, the script will abort to prevent applying a relative path on top of already scrambled data.
-* **Output:** Generates and appends to a `TRAVERSAL_HELPER_MASTER.csv` in the parent directory—a "recipe book" of surgical fixes that the Master Script reads automatically when run again.
+### 2. The Engines (Located in the `R/` directory)
+These files contain the underlying logic and should generally not be edited by standard users.
 
-*(Note: Initially pushed to this repo by JB, much of this code was originally written by MC and adapted for an iterative pipeline).*
-
-### 3. Pedigree Generation (`Pedigree.R`)
-* Generates import files (`Groups`, `Genotypes`, `Families`) to facilitate batch uploads ("tranches" of ~15-20 trials at a time) to the Data Management System (DMS). 
-* Cross-references local trial data against static downloaded DMS pedigree files (Groups, Families, Controls, Genotypes) representing the data already in the system, effectively preventing duplicate uploads for the new tranche.
-
-### 4. Reading Field Data Sheets (`read_BrSt_sheets.R`)
-* A parser for extracting Branch and Straightness (Br/St) assessment data from unformatted, raw field layout sheets (e.g., Kintyre) into tidy formats, complete with automated Chi-Square tests to validate assessor scoring distributions.
-
-### 5. Utilities (`other_functions.R`)
-* A collection of ad-hoc scripts used for ground-truthing data. Includes tools for generating master ASCII inventory reports, scanning for duplicate measurements, and tallying family/parent overlaps between breeding cycles.
+* **`DP_batch_process_Master.R` (Dataplan Engine):** Ingests raw ASCII/TXT files, merges design files and spatial matrices, enforces global zero-padding on assessment ages, flags outliers/shrinkage, and outputs the final `_Full_Data_With_Flags.csv` and XML files. It automatically detects and applies surgical ID re-alignments if a `TRAVERSAL_HELPER_MASTER.csv` is present.
+* **`Data_orientation_corrections.R` (Traversal Engine):** Scans for spatial assessor errors via a 16-way brute force simulation. It finds the traversal path that maximizes biological correlation against a trusted anchor. Generates a "recipe book" of fixes (`TRAVERSAL_HELPER_MASTER.csv`) for the Dataplan Engine to apply.
+* **`Pedigree_diagnostics.R` (Pre-Flight Checks):** A diagnostic engine run before building the final pedigree. It compares your pending trial data against the existing DMS database, summarizing unique families, parent overlaps, and extracting instances of Open Pollination (OP) for manual review.
+* **`Pedigree.R` (Pedigree Builder):** Generates final import files (`Groups`, `Genotypes`, `Families`) to facilitate batch uploads to the DMS. It cross-references local trial data against static DB downloads to prevent duplicate uploads.
+* **`ASCII_diagnostics.R` (Utilities Engine):** Standalone tools for ground-truthing data, including functions to summarize ASCII inventory files, scan for duplicate measurements (e.g., repeating AV readings), and format raw spatial matrix files.
 
 ---
 
 # ⚙️ Workflow: Detect, Diagnose, & Chain
 
-To ensure the highest data integrity in multi-tree trials, the following workflow is recommended:
+To ensure the highest data integrity in multi-tree trials, the following workflow is recommended via `Master_Engine.R`:
 
-1. **The Baseline Run (Detect):** Run the Master Script (`DP_batch_process_Master.R`) on your raw data. This produces an initial `_Full_Data_With_Flags.csv` and the diagnostic `_graphs.pdf`. *(Note: Output files will NOT have the `_Corrected` suffix during a standard baseline run).*
+1. **The Baseline Run (Detect):** Configure your paths in `Master_Engine.R` and run **Block 1**. This produces an initial `_Full_Data_With_Flags.csv` and the diagnostic `_graphs.pdf`. *(Note: Output files will NOT have the `_Corrected` suffix during a standard baseline run).*
 2. **Visual Inspection:** Review the correlation plots in the generated PDF. Look for traits with poor correlations or severe left-skewing against expected 1:1 baselines. 
-3. **Establish an Anchor:** Identify a stable trait to use as your Absolute Anchor. **Ideally, this trait should be manually verified by comparing the physical paper records (from the drawers) against the CEDD database export.**
-4. **The Fix (Diagnose):** Open the Diagnostic Tool (`Data_orientation_corrections.R`). Feed it the wide data CSV from Step 1. Test the suspect trait against your verified anchor. Save the recommendations to the Master Helper.
-5. **The Chain (Speculative):** Toggle `USE_CORRECTED_DATA <- TRUE` in the Diagnostic Tool. You can now use your newly corrected trait as an anchor for further diagnostics. Use this primarily when you can observe a consistent pattern of assessor error.
-6. **The Final Pass (Correct):** Run the Master Script one final time on the raw data folder. It will seamlessly ingest the `TRAVERSAL_HELPER_MASTER.csv`, apply the fixes simultaneously, and output files cleanly marked with a `_Corrected` suffix to indicate spatial logic was applied.
+3. **Establish an Anchor:** Identify a stable trait to use as your Absolute Anchor. Ideally, this trait should be manually verified by comparing the physical paper records against the CEDD database export.
+4. **The Fix (Diagnose):** In `Master_Engine.R`, configure the Traversal settings and run **Block 2**. Test the suspect trait against your verified anchor. This saves recommendations to the Master Helper.
+5. **The Chain (Speculative):** Toggle `USE_CORRECTED_DATA <- TRUE` in the config block. You can now use your newly corrected trait as an anchor for further diagnostics. *Note: Chaining relies heavily on visually identifying consistent assessor error patterns and aborts automatically if a double-scramble is detected.*
+6. **The Final Pass (Correct):** Run **Block 1** (Master Script) one final time. It will seamlessly ingest the `TRAVERSAL_HELPER_MASTER.csv`, apply the fixes simultaneously, and output files cleanly marked with a `_Corrected` suffix.
 
 ---
 
@@ -67,16 +50,16 @@ To ensure the highest data integrity in multi-tree trials, the following workflo
 ### 📁 Expected Trial Folder Input
 The script dynamically trawls the `TRIAL_SERIES` folder for:
 * **`*_ASCII.csv/xlsx`** *(Required)*: The raw PowerBI measurement export.
-* **`*_Matrix.csv`** *(Soft Requirement)*: The physical spatial layout of the trial. Technically optional for raw pipeline processing, but strictly required for downstream spatial analyses and final upload to DMS.
+* **`*_Matrix.csv`** *(Soft Requirement)*: The physical spatial layout of the trial. Required for downstream spatial analyses and final upload to DMS.
 * **`*_DF.xlsx/txt`** *(Optional)*: The design file containing Crosses and Blocks.
-* **`*_AD_<age>.csv/xlsx`** *(Optional)*: Additional Data files to be merged. Examples include harvest age Dm and Av from Moray, or resi data from Kintyre, Kielder, Moray and Brecon. 
-* **`TRAVERSAL_HELPER_MASTER.csv`** *(Optional)*: The orientation "recipe book" generated by the Diagnostic Tool.
+* **`*_AD_<age>.csv/xlsx`** *(Optional)*: Additional Data files to be merged.
+* **`TRAVERSAL_HELPER_MASTER.csv`** *(Optional)*: The orientation "recipe book" generated by the Traversal Engine.
 
 ### 📊 Main Pipeline Outputs
-*(The `_Corrected` suffix is automatically appended ONLY if the `TRAVERSAL_HELPER_MASTER.csv` is detected and applied, or a hardcoded edge-case is triggered).*
+*(The `_Corrected` suffix is automatically appended ONLY if spatial logic was successfully applied).*
 
 * `*_Full_Data_With_Flags[_Corrected].csv`: Master wide-format dataset with all spatial, pedigree, and corrected measurement data.
-* `*_graphs[_Corrected].pdf`: Comprehensive diagnostic report featuring **Spearman Rho** coefficients on all correlation plots to verify the success of ID re-alignment.
+* `*_graphs[_Corrected].pdf`: Comprehensive diagnostic report featuring Spearman Rho coefficients to verify the success of ID re-alignment.
 * `*_Stats[_Corrected].csv`: Summary statistics (N, Mean, CV%, etc.) for all valid traits.
 * `*_Trait_Correlations[_Corrected].csv`: A tidy table of all trait-to-trait Spearman rank correlations for the specific trial.
 * `MASTER_Trait_Correlations.csv`: A synthesized global table combining correlation data across all processed trials in the series.
@@ -85,5 +68,5 @@ The script dynamically trawls the `TRIAL_SERIES` folder for:
 ### 🛑 Validation Flags
 Any flags generated during processing are automatically consolidated into the `Validation_record` column. This includes:
 * **Extreme Outliers:** Values exceeding Mean ± 4 SD.
-* **Temporal Shrinkage:** Any repeated measurements (most often Ht or Dm) where latter-age stems are recorded as smaller than the previous age. The presence of these flags in a dataset will be indicated by the "Shrinkage" plots in the pdf report. If the data is included in the ASCII import, their units will be verified to be the same before flags are assigned. Repeated measurements of pilodyn and/or ordinal data are excluded from these flags.
+* **Temporal Shrinkage:** Any repeated measurements (most often Ht or Dm) where latter-age stems are recorded as smaller than the previous age. 
 * **ID Re-alignment:** If a tree was moved by the diagnostic logic, it will state: *"ID Realigned from [Path] (Anchored to [Trait])"*.
