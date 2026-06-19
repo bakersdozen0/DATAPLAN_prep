@@ -38,8 +38,7 @@ parse_long_design_file <- function(filepath, exp_prefix, spp_code) {
       Family_name = case_when(
         Design_ID == 0 ~ paste0(exp_prefix, "_Filler"),
         !is.na(Control_Name) ~ paste0(prefix_low, Control_Name),
-        !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0(prefix_low, Maternal_ID, "_OPCB"),
-        !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0(prefix_low, Maternal_ID, "_", prefix_low, Paternal_ID),
+        !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0(prefix_low, Maternal_ID, "_", Paternal_ID),        !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0(prefix_low, Maternal_ID, "_", prefix_low, Paternal_ID),
         TRUE ~ str_replace_all(Cross_Name, "\\s+", "") %>% str_replace(paste0("^", spp_code), paste0(prefix_low, "_"))
       )
     ) %>% select(Plot, Block, SubBlock, Family_name)

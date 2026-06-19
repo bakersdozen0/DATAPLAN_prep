@@ -78,7 +78,7 @@ parse_family_types <- function(df) {
   df %>%
     mutate(
       family_type = case_when(
-        str_detect(family_name, "(?i)OP") ~ "Open Pollinated (OP)",
+        str_detect(family_name, "(?i)OP[A-Z]{0,2}") ~ "Open Pollinated (OP)",
         str_detect(family_name, "(?i)iller") ~ "Filler",
         dam == sire ~ "Control / Provenance / Founder", 
         TRUE ~ "Control Pollinated (CP)"

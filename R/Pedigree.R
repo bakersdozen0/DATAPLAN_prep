@@ -113,7 +113,7 @@ run_pedigree_builder <- function(base_dir, pending_dir, existing_dir, species_co
       mutate(
         Mum_name = str_extract(Family_name, "^[^_]+"), Mum_type = "I",
         Raw_Dad = str_extract(Family_name, "(?<=_).*"),
-        Is_OPCB = str_detect(Raw_Dad, "(?i)OPCB"),
+        Is_OPCB = str_detect(Raw_Dad, "(?i)OP"),
         Dad_type = if_else(Is_OPCB, "G", "I"),
         Dad_name = case_when(Is_OPCB ~ "Unknown", TRUE ~ Raw_Dad),
         Dad_id = NA_character_,
