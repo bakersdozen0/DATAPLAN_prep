@@ -492,9 +492,19 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
       }
       
       # --- 4. Load Spatial Matrix ---
-      matrix_files <- dir_ls(exp_path, regexp = "(?i)_Matrix\\.csv$")
+      matrix_files <- dir_ls(exp_path, regexp = "(?i)_(Matrix\\.csv|layout\\.xlsx)$")
       if (length(matrix_files) > 0) {
-        raw_matrix <- read.csv(matrix_files[1], header = FALSE, colClasses = "character")
+        matrix_path <- matrix_files[1]
+        
+        # 2. Fork the reader based on the file extension
+        if (str_detect(matrix_path, "(?i)\\.xlsx$")) {
+          # Read Excel (requires readxl library, which is already loaded in your script)
+          raw_matrix <- readxl::read_excel(matrix_path, col_names = FALSE, col_types = "text") %>% as.data.frame()
+        } else {
+          # Read CSV
+          raw_matrix <- read.csv(matrix_path, header = FALSE, colClasses = "character")
+        }
+      
         raw_matrix[is.na(raw_matrix)] <- "0"
         spatial_info <- prowppos(raw_matrix)
         

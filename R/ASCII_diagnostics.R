@@ -198,7 +198,7 @@ format_matrix_files <- function(root_dir) {
   
   for (curr_exp in experiments_to_check) {
     exp_path <- file.path(root_dir, curr_exp)
-    source_file <- dir_ls(exp_path, regexp = "(?i)_matrix\\.xlsx$")
+    source_file <- dir_ls(exp_path, regexp = "(?i)_matrix\\.xlsx|layout\\.xlsx)$")
     if (length(source_file) == 0) next
     
     matrix_data <- tryCatch({ read_excel(source_file, sheet = "matrix", col_names = FALSE) }, 
