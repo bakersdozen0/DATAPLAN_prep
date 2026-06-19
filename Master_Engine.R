@@ -30,17 +30,20 @@ source(here("R", "ASCII_diagnostics.R"))
 # ============================================================================
 
 # GLOBAL SETTINGS
-BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Demo2/Scots_Pine"
-TRIAL_SERIES  <- "Diallel" 
-PLOT_TYPE     <- "MULTI" # "SINGLE" or "MULTI"
-SPECIES_CODE  <- "SP"    # "SS" or "SP"
-SPECIES_NAME  <- "CBCScots" 
+BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Demo1/Sitka"
+TRIAL_SERIES  <- "High GCA Fullsib P85-P87 experiments" # "High GCA Fullsib P85-P87 experiments" / "Backwards selected Fullsib P96-P99 experiments"/ "Trials" / "Diallel"
+TARGET_DIR    <- file.path(BASE_DIR, TRIAL_SERIES) # for user legibility 
+TARGET_TRIALS <- NULL # set to NULL to run on all experiments in trial_series directory, or to a list of trials that you want to test: e.g. c("Craigellachie 49", "Ae 58")
+
+PLOT_TYPE     <- "MULTI" # Refering to number of trees per plot "SINGLE" or "MULTI"
+SPECIES_CODE  <- "SS"    # this is FR notation ( "SS" or "SP" )
+SPECIES_NAME  <- "CBCSitka" # This is DMS notation ( "CBC Sitka" or "CBCScots" )
 
 # DATAPLAN SPECIFIC
 TRAITS_FILE   <- here("Trait_trans.csv")
 
 # TRAVERSAL AUDIT SPECIFIC
-TRAVERSAL_FILE      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka/High GCA Fullsib P85-P87 experiments/Craigellachie 49/Craigellachie_49_Full_Data_With_Flags.csv"
+TRAVERSAL_FILE      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Demo1/Sitka/High GCA Fullsib P85-P87 experiments/Craigellachie 49/Craigellachie_49_Full_Data_With_Flags.csv"
 BASELINE_TRAIT      <- "Ht_06" 
 TEST_TRAITS         <- c("Dm_10","Ht_10","Pil_15","Dm_15","Cr_07") 
 GRID_ROWS           <- 8
@@ -49,7 +52,7 @@ EXPECT_NEGATIVE_COR <- FALSE
 USE_CORRECTED_DATA  <- FALSE
 
 # PEDIGREE SPECIFIC
-HAS_EXISTING_DB <- FALSE 
+HAS_EXISTING_DB <- TRUE 
 EXISTING_DIR    <- file.path(BASE_DIR, "Backwards Selected Fullsib P96-P99 experiments")
 FOUNDERS_FILE   <- paste0(SPECIES_CODE, "_tibdb_clones.csv") 
 CONTROLS_FILE   <- "dataplan_family_control_import.csv" 
@@ -65,10 +68,11 @@ run_dataplan_pipeline(
   base_dir     = BASE_DIR,
   trial_series = TRIAL_SERIES,
   traits_file  = TRAITS_FILE,
-  plot_type    = PLOT_TYPE
+  plot_type    = PLOT_TYPE,
+  target_trials = TARGET_TRIALS
 )
 
-# 2. BATCH PLOT TRAVERSAL AUDIT
+# 2.PLOT TRAVERSAL AUDIT
 # Diagnoses spatial orientation and mirroring issues.
 run_traversal_audit(
   wide_data_csv       = TRAVERSAL_FILE,
@@ -108,7 +112,7 @@ run_pedigree_builder(
 
 # 4. UTILITIES & DIAGNOSTICS
 # Standalone functions for specific data checks.
-summarize_ascii_inventory(base_dir = BASE_DIR)
-scan_av_duplicates(base_dir = BASE_DIR)
-extract_op_instances(pending_dir = file.path(BASE_DIR, TRIAL_SERIES), base_dir = BASE_DIR)
+summarize_ascii_inventory(target_dir = TARGET_DIR)
+scan_av_duplicates(target_dir = TARGET_DIR)
+extract_op_instances(target_dir= TARGET_DIR, species_code = SPECIES_CODE)
 format_matrix_files(root_dir = BASE_DIR)

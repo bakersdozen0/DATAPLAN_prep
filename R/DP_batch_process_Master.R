@@ -389,7 +389,7 @@ get_traversal_path <- function(layout_mat, start_corner="top_left", direction="h
 # PART 1: LOAD TRANSLATION MAP & FOLDERS ####
 # # # # # # # # # # # # # # # # # # # # # # # 
 
-run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type) {
+run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type,target_trials=NULL) {
   
   root_data_dir <- file.path(base_dir, trial_series)
   
@@ -407,9 +407,17 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
   experiments_to_process <- setdiff(all_dirs, c("00_Scripts", "Archive", ".git", ".Rproj.user"))
   message(paste("Found", length(experiments_to_process), "folders to check."))
   
-  # NOTE: Uncomment and set this to run specific folders for testing!
-  # experiments_to_process <- c("Culloden10")
-  
+  # --- TARGETED RUN LOGIC ---
+  if (!is.null(target_trials)) {
+    valid_targets <- intersect(target_trials, experiments_to_process)
+    if (length(valid_targets) == 0) {
+      stop("Error: None of the specified target_trials were found in the directory.")
+    }
+    experiments_to_process <- valid_targets
+    message(paste("Targeted Run Mode: Only processing", length(experiments_to_process), "specified trial(s)."))
+  } else {
+    message(paste("Found", length(experiments_to_process), "folders to check."))
+  }
   # # # # # # # # # # # # # # # # # # # # # # # 
   # PART 2: MAIN PROCESSING LOOP ####
   # # # # # # # # # # # # # # # # # # # # # # # 
@@ -423,7 +431,7 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
       message(paste("\n=========================================="))  
       message(paste("Processing Folder:", curr_exp, "| Mode:", plot_type))
       
-      exp_path <- file.path(ROOT_DATA_DIR, curr_exp)
+      exp_path <- file.path(root_data_dir, curr_exp)
       file_prefix <- str_replace_all(curr_exp, " ", "_")
       
       genetic_info <- NULL
@@ -959,7 +967,7 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
       arrange(Trial, desc(Spearman_Rho))
     
     # Save to the root folder (e.g., "Sitka/High GCA Fullsib P85-P87 experiments")
-    summary_path <- file.path(ROOT_DATA_DIR, paste0("MASTER_Trait_Correlations_", format(Sys.Date(), "%Y%m%d"), ".csv"))
+    summary_path <- file.path(root_data_dir, paste0("MASTER_Trait_Correlations_", format(Sys.Date(), "%Y%m%d"), ".csv"))
     write_csv(master_cor_df, summary_path)
     
     message(paste("  -> Master correlation table saved to:", summary_path))
@@ -969,4 +977,4 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
   message("==========================================\n")
   
 }
-}
+
