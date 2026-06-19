@@ -5,8 +5,8 @@
 # ----------------------------------------------------------------------------
 # 1. Summarize ASCII Inventory
 # ----------------------------------------------------------------------------
-summarize_ascii_inventory <- function(base_dir) {
-  file_list <- dir_ls(base_dir, recurse = TRUE, regexp = "(?i)ASCII\\.(xlsx|csv)$")
+summarize_ascii_inventory <- function(target_dir) {
+  file_list <- dir_ls(target_dir, recurse = TRUE, regexp = "(?i)ASCII\\.(xlsx|csv)$")
   message("Found ", length(file_list), " ASCII files to summarize.")
   
   trial_analysis <- file_list %>%
@@ -51,15 +51,15 @@ summarize_ascii_inventory <- function(base_dir) {
   
   final_report <- trial_analysis %>% select(experiment_file, assessment, assessment_year, avg_stems_per_plot, min_stems_in_a_plot, max_stems_in_a_plot, total_plots_count) %>% arrange(experiment_file, assessment_year)
   
-  write_csv(final_report, file.path(base_dir, "MASTER_ASCII_Inventory_Report.csv"))
-  message("ASCII Report saved successfully to ", base_dir)
+  write_csv(final_report, file.path(target_dir, "MASTER_ASCII_Inventory_Report.csv"))
+  message("ASCII Report saved successfully to ", target_dir)
 }
 
 # ----------------------------------------------------------------------------
 # 2. Scan AV Duplicates
 # ----------------------------------------------------------------------------
-scan_av_duplicates <- function(base_dir) {
-  file_list <- dir_ls(base_dir, recurse = TRUE, regexp = "(?i)ASCII\\.(xlsx|csv)$")
+scan_av_duplicates <- function(target_dir) {
+  file_list <- dir_ls(target_dir, recurse = TRUE, regexp = "(?i)ASCII\\.(xlsx|csv)$")
   message("Scanning ", length(file_list), " ASCII files for duplicate Av measurements...")
   
   duplicate_av_list <- list()
@@ -102,7 +102,7 @@ scan_av_duplicates <- function(base_dir) {
   
   if (length(duplicate_av_list) > 0) {
     all_duplicates <- bind_rows(duplicate_av_list) %>% select(Experiment = experiment, Plot = plot, Tree = tree_pos, Assessment = assessment, Age = assessment_year, Measurement_Count = measurement_count) %>% arrange(Experiment, as.numeric(Plot), as.numeric(Tree))
-    out_path <- file.path(base_dir, "Repeat_Av_Scan_Results.csv")
+    out_path <- file.path(target_dir, "Repeat_Av_Scan_Results.csv")
     write_csv(all_duplicates, out_path)
     message("Found duplicates! Diagnostic report saved to: ", out_path)
   } else {
@@ -113,22 +113,80 @@ scan_av_duplicates <- function(base_dir) {
 # ----------------------------------------------------------------------------
 # 3. Extract Open Pollinated (OP) Instances
 # ----------------------------------------------------------------------------
-extract_op_instances <- function(pending_dir, base_dir) {
-  cat("\nScanning Full Data files for OP instances...\n")
-  full_data_files <- dir_ls(pending_dir, recurse = TRUE, regexp = "(?i)Full_Data_With_Flags\\.csv$")
+extract_op_instances <- function(target_dir, species_code) {
+  cat("\nScanning for OP instances in Design and Trial data...\n")
+  
+  # --- PART 1: EXTRACT FROM TRIAL DATA ---
+  full_data_files <- dir_ls(target_dir, recurse = TRUE, regexp = "(?i)Full_Data_With_Flags\\.csv$")
   
   op_trial_data <- full_data_files %>%
     map_df(function(file) {
       df <- tryCatch(read_csv(file, show_col_types = FALSE, col_types = cols(.default = col_character())), error = function(e) return(NULL))
       if (is.null(df)) return(NULL)
+      
       fam_col <- grep("(?i)^family_name$", names(df), value = TRUE)
       if (length(fam_col) == 0) return(NULL)
       
-      df %>% rename(Family_name = all_of(fam_col[1])) %>% select(Family_name) %>% distinct() %>% filter(str_detect(Family_name, "(?i)OP")) %>% mutate(Experiment_Name = str_replace_all(str_extract(basename(file), "^[^_]+"), " ", "_"), Source_File = basename(file), Data_Type = "Trial Data")
+      df %>% 
+        rename(Family_name = all_of(fam_col[1])) %>% 
+        select(Family_name) %>% 
+        distinct() %>% 
+        filter(str_detect(Family_name, "(?i)OP")) %>% 
+        mutate(Experiment_Name = str_replace_all(str_extract(basename(file), "^[^_]+"), " ", "_"))
     })
   
-  if (!is.null(op_trial_data) && nrow(op_trial_data) > 0) write_csv(op_trial_data, file.path(base_dir,"Diagnostic_TrialData_OP.csv"))
-  message("OP instances extracted to ", base_dir)
+  # --- PART 2: EXTRACT FROM DESIGN FILES ---
+  # Searches for both .txt and .xlsx design files
+  design_files <- dir_ls(target_dir, recurse = TRUE, regexp = "(?i)_DF(\\.txt|\\.xlsx|\\.)?$")
+  
+  op_design_data <- design_files %>%
+    map_df(function(file) {
+      exp_prefix <- str_replace_all(str_extract(basename(file), "^[^_]+"), " ", "_")
+      
+      # Leverage the globally available parsers from DP_batch_process_Master.R!
+      if (str_detect(file, "(?i)\\.xlsx$")) {
+        df <- tryCatch(parse_xlsx_design_file(file, exp_prefix, species_code), error = function(e) return(NULL))
+      } else {
+        df <- tryCatch(parse_long_design_file(file, exp_prefix, species_code), error = function(e) return(NULL))
+      }
+      
+      if (is.null(df) || !"Family_name" %in% names(df)) return(NULL)
+      
+      df %>% 
+        select(Family_name) %>% 
+        distinct() %>% 
+        filter(str_detect(Family_name, "(?i)OP")) %>% 
+        mutate(Experiment_Name = exp_prefix)
+    })
+  
+  # --- PART 3: THE COMPARISON REPORT ---
+  trial_summary <- if(!is.null(op_trial_data) && nrow(op_trial_data) > 0) op_trial_data %>% mutate(In_Trial_Data = "Yes") else tibble(Experiment_Name=character(), Family_name=character(), In_Trial_Data=character())
+  design_summary <- if(!is.null(op_design_data) && nrow(op_design_data) > 0) op_design_data %>% mutate(In_Design_Data = "Yes") else tibble(Experiment_Name=character(), Family_name=character(), In_Design_Data=character())
+  
+  if (nrow(trial_summary) == 0 && nrow(design_summary) == 0) {
+    message("No OP instances found in either Design or Trial files.")
+    return(invisible(NULL))
+  }
+  
+  # Full Join to catch matches, missing trials, and unexpected additions
+  comparison_df <- full_join(design_summary, trial_summary, by = c("Experiment_Name", "Family_name")) %>%
+    mutate(
+      In_Design_Data = replace_na(In_Design_Data, "No"),
+      In_Trial_Data = replace_na(In_Trial_Data, "No"),
+      Status = case_when(
+        In_Design_Data == "Yes" & In_Trial_Data == "Yes" ~ "Match (Processed Properly)",
+        In_Design_Data == "Yes" & In_Trial_Data == "No"  ~ "WARNING: In Design, Missing in Trial",
+        In_Design_Data == "No"  & In_Trial_Data == "Yes" ~ "FLAG: Found in Trial, Missing in Design"
+      )
+    ) %>%
+    arrange(Experiment_Name, Family_name)
+  
+  out_path <- file.path(target_dir, "Diagnostic_OP_Design_vs_Trial_Comparison.csv")
+  write_csv(comparison_df, out_path)
+  message("OP Comparison complete! Exported to: ", basename(out_path))
+  
+  # Print a quick summary to the console so the user sees anomalies immediately
+  print(comparison_df %>% count(Status, name = "Total_Instances"))
 }
 
 # ----------------------------------------------------------------------------
