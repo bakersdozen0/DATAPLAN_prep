@@ -492,7 +492,7 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
       }
       
       # --- 4. Load Spatial Matrix ---
-      matrix_files <- dir_ls(exp_path, regexp = "(?i)_Matrix\\.csv|layout\\.xlsx)$")
+      matrix_files <- dir_ls(exp_path, regexp = "(?i)_(Matrix\\.csv|layout\\.xlsx)$")
       if (length(matrix_files) > 0) {
         matrix_path <- matrix_files[1]
         
