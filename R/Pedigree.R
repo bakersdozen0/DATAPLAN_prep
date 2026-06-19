@@ -247,9 +247,17 @@ run_pedigree_builder <- function(base_dir, pending_dir, existing_dir, species_co
   }
   
   # --- 7. EXPORT VERIFIED FILES ---
-  write_csv(true_groups_export, file.path(base_dir, "Pedigree", paste0("Verified_", species_code, "_Groups_Import.csv")))
-  write_csv(true_genotypes_export, file.path(base_dir, "Pedigree", paste0("Verified_", species_code, "_Genotypes_Import.csv")))
-  write_csv(true_families_export, file.path(base_dir, "Pedigree", paste0("Verified_", species_code, "_Families_Import.csv")))
+  # Groups: Drop Group_id
+  write_csv(true_groups_export %>% select(-Group_id), 
+            file.path(base_dir, "Pedigree", paste0("Verified_", species_code, "_Groups_Import.csv")))
+  
+  # Genotypes: Drop Genotype_id and Family_id
+  write_csv(true_genotypes_export %>% select(-Genotype_id, -Family_id), 
+            file.path(base_dir, "Pedigree", paste0("Verified_", species_code, "_Genotypes_Import.csv")))
+  
+  # Families: Drop Family_id, Mum_id, and Dad_id
+  write_csv(true_families_export %>% select(-Family_id, -Mum_id, -Dad_id), 
+            file.path(base_dir, "Pedigree", paste0("Verified_", species_code, "_Families_Import.csv")))
   
   # --- 8. GENERATE COMPLETE FAMILIES ORIGIN FILE ---
   cat("\n--- CALCULATING COMPLETE FAMILY ORIGINS (MACRO-REGIONS & OPCB) ---\n")
