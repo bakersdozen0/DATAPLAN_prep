@@ -58,11 +58,11 @@ summarize_ascii_inventory <- function(target_dir) {
 # ----------------------------------------------------------------------------
 # 2. Scan AV Duplicates
 # ----------------------------------------------------------------------------
-scan_av_duplicates <- function(target_dir) {
+scan_duplicates <- function(target_dir) {
   file_list <- dir_ls(target_dir, recurse = TRUE, regexp = "(?i)ASCII\\.(xlsx|csv)$")
-  message("Scanning ", length(file_list), " ASCII files for duplicate Av measurements...")
+  message("Scanning ", length(file_list), " ASCII files for any duplicate trait measurements...")
   
-  duplicate_av_list <- list()
+  duplicate_master_list <- list()
   
   for (file_path in file_list) {
     exp_name <- basename(dirname(file_path))
@@ -73,42 +73,82 @@ scan_av_duplicates <- function(target_dir) {
         raw_data <- suppressMessages(read_excel(file_path, col_types = "text")) %>% clean_names()
       }
       
-      assess_col <- intersect(c("assessment", "assessment_type_long", "assessment_type"), names(raw_data))[1]
-      if (!is.na(assess_col)) raw_data <- raw_data %>% rename(assessment = !!sym(assess_col))
+      avail_cols <- names(raw_data)
       
-      year_col <- intersect(c("assessment_year", "assessment_year_long", "age"), names(raw_data))[1]
-      if (!is.na(year_col)) raw_data <- raw_data %>% rename(assessment_year = !!sym(year_col))
+      col_trait <- intersect(c("assessment", "assessment_type", "assessment_type_long", "trait"), avail_cols)[1]
+      col_age   <- intersect(c("assessment_year", "age", "year_of_assessment", "assessment_yr"), avail_cols)[1]
+      col_plot  <- intersect(c("plot", "plot_no", "treatment"), avail_cols)[1]
+      col_tree  <- intersect(c("inferred_tree_position", "tree", "tree_no", "tree_pos"), avail_cols)[1]
+      col_unit  <- intersect(c("unit", "units"), avail_cols)[1]
+      col_year  <- intersect(c("year", "calendar_year"), avail_cols)[1]
       
-      if("plot" %in% names(raw_data)) raw_data <- raw_data %>% rename(plot = plot)
+      col_meas  <- intersect(c("measurement", "value", "score"), avail_cols)[1]
+      col_rem   <- intersect(c("remarks", "remark", "notes", "comments"), avail_cols)[1]
       
-      if ("inferred_tree_position" %in% names(raw_data)) {
-        raw_data <- raw_data %>% rename(tree_pos = inferred_tree_position)
-      } else {
+      if (!is.na(col_trait)) raw_data <- raw_data %>% rename(assessment = !!sym(col_trait))
+      if (!is.na(col_age))   raw_data <- raw_data %>% rename(assessment_year = !!sym(col_age))
+      if (!is.na(col_plot))  raw_data <- raw_data %>% rename(plot = !!sym(col_plot))
+      
+      if (!is.na(col_unit)) { raw_data <- raw_data %>% rename(unit = !!sym(col_unit)) } else { raw_data <- raw_data %>% mutate(unit = NA_character_) }
+      if (!is.na(col_year)) { raw_data <- raw_data %>% rename(year = !!sym(col_year)) } else { raw_data <- raw_data %>% mutate(year = NA_character_) }
+      if (!is.na(col_meas)) { raw_data <- raw_data %>% rename(measurement = !!sym(col_meas)) } else { raw_data <- raw_data %>% mutate(measurement = NA_character_) }
+      if (!is.na(col_rem))  { raw_data <- raw_data %>% rename(remarks = !!sym(col_rem)) } else { raw_data <- raw_data %>% mutate(remarks = NA_character_) }
+      
+      if (!is.na(col_tree)) {
+        raw_data <- raw_data %>% rename(tree_pos = !!sym(col_tree))
+      } else if (all(c("assessment", "assessment_year", "plot") %in% names(raw_data))) {
         raw_data <- raw_data %>% group_by(assessment, assessment_year, plot) %>% mutate(tree_pos = row_number()) %>% ungroup()
       }
       
-      req_cols <- c("plot", "tree_pos", "assessment", "assessment_year")
+      req_cols <- c("plot", "tree_pos", "assessment")
       if (all(req_cols %in% names(raw_data))) {
+        
+        # 1. Filter out NAs and identify the granular, true duplicates
         duplicates <- raw_data %>%
-          filter(str_detect(assessment, "(?i)^AV")) %>%
-          group_by(plot, tree_pos, assessment, assessment_year) %>%
-          summarise(measurement_count = n(), .groups = "drop") %>%
+          filter(!is.na(assessment)) %>% # <-- NEW: Vaporizes the ghost rows!
+          group_by(plot, tree_pos, assessment, unit, year, assessment_year) %>%
+          summarise(
+            measurement_count = n(), 
+            Conflicting_Remarks = paste(na.omit(remarks), collapse = " vs "),
+            .groups = "drop"
+          ) %>%
           filter(measurement_count > 1) 
         
-        if (nrow(duplicates) > 0) duplicate_av_list[[exp_name]] <- duplicates %>% mutate(experiment = exp_name)
+        if (nrow(duplicates) > 0) duplicate_master_list[[exp_name]] <- duplicates %>% mutate(experiment = exp_name)
       }
     }, error = function(e) {})
   }
   
-  if (length(duplicate_av_list) > 0) {
-    all_duplicates <- bind_rows(duplicate_av_list) %>% select(Experiment = experiment, Plot = plot, Tree = tree_pos, Assessment = assessment, Age = assessment_year, Measurement_Count = measurement_count) %>% arrange(Experiment, as.numeric(Plot), as.numeric(Tree))
-    out_path <- file.path(target_dir, "Repeat_Av_Scan_Results.csv")
+  if (length(duplicate_master_list) > 0) {
+    # 2. Roll up the granular duplicates into a high-level summary
+    all_duplicates <- bind_rows(duplicate_master_list) %>% 
+      group_by(experiment, assessment, unit, year, assessment_year) %>%
+      summarise(
+        Affected_Trees = n(),
+        Max_Repeats_Per_Tree = max(measurement_count),
+        Sample_Remark = first(Conflicting_Remarks),
+        .groups = "drop"
+      ) %>%
+      select(
+        Experiment = experiment, 
+        Assessment = assessment, 
+        Unit = unit, 
+        Calendar_Year = year, 
+        Age = assessment_year, 
+        Affected_Trees, 
+        Max_Repeats = Max_Repeats_Per_Tree,
+        Sample_Remark
+      ) %>% 
+      arrange(Experiment, Assessment, suppressWarnings(as.numeric(Age)))
+    
+    out_path <- file.path(target_dir, "Global_Duplicate_Scan_Results.csv")
     write_csv(all_duplicates, out_path)
-    message("Found duplicates! Diagnostic report saved to: ", out_path)
+    message("Found duplicates! Summarized report saved to: ", out_path)
   } else {
-    message("Scan Complete! No repeat Av measurements found.")
+    message("Scan Complete! No repeat measurements found for any traits.")
   }
 }
+
 
 # ----------------------------------------------------------------------------
 # 3. Extract Open Pollinated (OP) Instances

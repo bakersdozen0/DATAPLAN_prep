@@ -31,7 +31,7 @@ source(here("R", "ASCII_diagnostics.R"))
 
 # GLOBAL SETTINGS
 BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Demo1/Sitka"
-TRIAL_SERIES  <- "High GCA Fullsib P85-P87 experiments" # "High GCA Fullsib P85-P87 experiments" / "Backwards selected Fullsib P96-P99 experiments"/ "Trials" / "Diallel"
+TRIAL_SERIES  <- "High GCA Fullsib P85-P87 experiments" # "High GCA Fullsib P85-P87 experiments" / "Backwards selected Fullsib P96-P99 experiments"/ "Population_Studies" /"Trials" / "Diallel"
 TARGET_DIR    <- file.path(BASE_DIR, TRIAL_SERIES) # for user legibility 
 TARGET_TRIALS <- NULL # set to NULL to run on all experiments in trial_series directory, or to a list of trials that you want to test: e.g. c("Craigellachie 49", "Ae 58")
 
@@ -46,7 +46,7 @@ TRAITS_FILE   <- here("Trait_trans.csv")
 TRAVERSAL_FILE      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Demo1/Sitka/High GCA Fullsib P85-P87 experiments/Craigellachie 49/Craigellachie_49_Full_Data_With_Flags.csv"
 BASELINE_TRAIT      <- "Ht_06" 
 TEST_TRAITS         <- c("Dm_10","Ht_10","Pil_15","Dm_15","Cr_07") 
-GRID_ROWS           <- 8
+GRID_ROWS           <- 8 ## these are only used if a matrix/layout file is missing
 GRID_COLS           <- 1
 EXPECT_NEGATIVE_COR <- FALSE
 USE_CORRECTED_DATA  <- FALSE
@@ -62,6 +62,13 @@ OP_FAM_FILE     <- paste0(SPECIES_CODE, "_OP_Families.xlsx")
 # ============================================================================
 #### EXECUTION BLOCKS ####
 # ============================================================================
+
+# UTILITIES & DIAGNOSTICS
+# Standalone functions for specific data checks.
+summarize_ascii_inventory(target_dir = TARGET_DIR)
+scan_duplicates(target_dir = TARGET_DIR)
+extract_op_instances(target_dir= TARGET_DIR, species_code = SPECIES_CODE)
+format_matrix_files(root_dir = BASE_DIR)
 
 # 1. MAIN DATAPLAN PIPELINE
 # Converts raw ASCII/XLSX into formatted wide/long data with flags and XML.
@@ -112,9 +119,3 @@ run_pedigree_builder(
   has_existing_db = HAS_EXISTING_DB
 )
 
-# 4. UTILITIES & DIAGNOSTICS
-# Standalone functions for specific data checks.
-summarize_ascii_inventory(target_dir = TARGET_DIR)
-scan_av_duplicates(target_dir = TARGET_DIR)
-extract_op_instances(target_dir= TARGET_DIR, species_code = SPECIES_CODE)
-format_matrix_files(root_dir = BASE_DIR)
