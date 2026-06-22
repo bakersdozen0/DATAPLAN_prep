@@ -338,15 +338,21 @@ prowppos <- function(matrix_data) {
   
 # --- 4. Map interior tree sequence to full plot sequence ---
 map_interior_trees <- function(tree_idx, subset_size, full_size) {
-    if (is.na(subset_size) || is.na(full_size) || subset_size == full_size) return(tree_idx)
-    n <- sqrt(full_size); m <- sqrt(subset_size)
-    if (n %% 1 != 0 || m %% 1 != 0) return(tree_idx)
-    offset <- (n - m) / 2
-    row_m <- ceiling(tree_idx / m); col_m <- (tree_idx - 1) %% m + 1
-    row_n <- row_m + offset; col_n <- col_m + offset
-    mapped_idx <- (row_n - 1) * n + col_n
-    return(mapped_idx)
-  }
+  
+  # ADDED: subset_size == 1 bypass. 
+  # If max tree ID is 1, it's a plot-wide summary, not a 1x1 interior grid.
+  if (is.na(subset_size) || is.na(full_size) || subset_size == full_size || subset_size == 1) return(tree_idx)
+  
+  n <- sqrt(full_size); m <- sqrt(subset_size)
+  if (n %% 1 != 0 || m %% 1 != 0) return(tree_idx)
+  
+  offset <- (n - m) / 2
+  row_m <- ceiling(tree_idx / m); col_m <- (tree_idx - 1) %% m + 1
+  row_n <- row_m + offset; col_n <- col_m + offset
+  mapped_idx <- (row_n - 1) * n + col_n
+  
+  return(mapped_idx)
+}
   
 # --- 5. Traversal/ Data orientation correction ---
 get_grid_layout <- function(n_rows, n_cols, interior_only = FALSE) {
