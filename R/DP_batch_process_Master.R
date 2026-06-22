@@ -825,7 +825,7 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
         for(curr_age in unique_ages) {
           t_name <- paste0("Sur_", curr_age)
           if(t_name %in% unique(exp_data_long$Trait)) next
-          alive_trees <- exp_data_long %>% filter(Age == curr_age, !is.na(Value_Num), Value_Num != 0) %>% select(Plot, Tree) %>% distinct() %>% mutate(is_alive = TRUE)
+          alive_trees <- exp_data_long %>% filter(Age == curr_age, !is.na(Value_Num), (Value_Num != 0 | str_detect(Trait, "(?i)^Fr"))) %>% select(Plot, Tree) %>% distinct() %>% mutate(is_alive = TRUE)
           sur_df <- spatial_info %>% select(Plot, Tree) %>% left_join(alive_trees, by = c("Plot", "Tree")) %>%
             mutate(Trait = t_name, Age = curr_age, is_alive = replace_na(is_alive, FALSE), Value_Num = if_else(is_alive, 1, 0), Value_Char = as.character(Value_Num), UnitCode = "$1-1", Trait_Orig = paste0("Calculated_", t_name), Prefix = "SUR", Date = as.Date(NA)) %>% select(-is_alive)
           sur_list[[t_name]] <- sur_df
@@ -835,10 +835,31 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
       
       # --- 7. Flags & Logic ---
       data_with_outliers <- exp_data_long %>%
-        mutate(Is_Target_For_Zero_Removal = str_detect(Trait, "(?i)^(Pil|Br|St)"), Value_Num = if_else(Is_Target_For_Zero_Removal & Value_Num == 0, NA_real_, Value_Num), Value_Char = if_else(is.na(Value_Num), NA_character_, as.character(Value_Num))) %>% select(-Is_Target_For_Zero_Removal) %>% 
-        group_by(Trait) %>% mutate(n_unique = n_distinct(Value_Num, na.rm = TRUE), Is_Survival = str_detect(Trait, "(?i)Sur"), Is_Binary_Resi = str_detect(Trait, "(?i)(Resi|Drill|Amp|Den|Cull|Stem)") & n_unique <= 2, Is_Ordinal = !Is_Survival & !Is_Binary_Resi & n_unique < 9, Mean_Val = mean(Value_Num, na.rm = TRUE), SD_Val = sd(Value_Num, na.rm = TRUE), Lower_Limit = Mean_Val - (4 * SD_Val), Upper_Limit = Mean_Val + (4 * SD_Val),
-                                   Flag_Outlier = case_when(!is.na(Value_Num) & Is_Ordinal & Value_Num == 0 ~ TRUE, Is_Ordinal & Value_Num == 0 ~ TRUE, (Is_Survival | Is_Binary_Resi) & Value_Num > 1 ~ TRUE, !Is_Survival & !Is_Ordinal & !Is_Binary_Resi & !is.na(Value_Num) & (Value_Num < Lower_Limit | Value_Num > Upper_Limit) ~ TRUE, TRUE ~ FALSE)) %>% ungroup()
-      
+        mutate(Is_Target_For_Zero_Removal = str_detect(Trait, "(?i)^(Pil|Br|St)"), 
+               Value_Num = if_else(Is_Target_For_Zero_Removal & Value_Num == 0, NA_real_, Value_Num), 
+               Value_Char = if_else(is.na(Value_Num), NA_character_, as.character(Value_Num))) %>% 
+        select(-Is_Target_For_Zero_Removal) %>% 
+        group_by(Trait) %>% 
+        mutate(
+          n_unique = n_distinct(Value_Num, na.rm = TRUE), 
+          Is_Survival = str_detect(Trait, "(?i)Sur"), 
+          # ADDED Fr to the binary regex
+          Is_Binary_Resi = str_detect(Trait, "(?i)(Resi|Drill|Amp|Den|Cull|Stem|Fr)") & n_unique <= 2, 
+          Is_Ordinal = !Is_Survival & !Is_Binary_Resi & n_unique < 9, 
+          Mean_Val = mean(Value_Num, na.rm = TRUE), 
+          SD_Val = sd(Value_Num, na.rm = TRUE), 
+          Lower_Limit = Mean_Val - (4 * SD_Val), 
+          Upper_Limit = Mean_Val + (4 * SD_Val),
+          Flag_Outlier = case_when(
+            # EXEMPTED Fr from the Ordinal Zero flags
+            !is.na(Value_Num) & Is_Ordinal & Value_Num == 0 & !str_detect(Trait, "(?i)^Fr") ~ TRUE, 
+            Is_Ordinal & Value_Num == 0 & !str_detect(Trait, "(?i)^Fr") ~ TRUE, 
+            (Is_Survival | Is_Binary_Resi) & Value_Num > 1 ~ TRUE, 
+            !Is_Survival & !Is_Ordinal & !Is_Binary_Resi & !is.na(Value_Num) & (Value_Num < Lower_Limit | Value_Num > Upper_Limit) ~ TRUE, 
+            TRUE ~ FALSE
+          )
+        ) %>% ungroup()
+           
       global_age_seq <- data_with_outliers %>% filter(!is.na(Value_Num), str_detect(Trait, "_\\d+$")) %>% mutate(Base_Trait = str_remove(Trait, "_\\d+$"), Age_Num = suppressWarnings(as.numeric(str_extract(Trait, "\\d+$")))) %>% filter(!is.na(Age_Num)) %>% distinct(Base_Trait, Age_Num) %>% arrange(Base_Trait, Age_Num) %>% group_by(Base_Trait) %>% mutate(Expected_Prev_Age = lag(Age_Num)) %>% ungroup()
       
       
