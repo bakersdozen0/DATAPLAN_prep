@@ -808,10 +808,18 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
             
             translation_df <- tibble(Original_Tree = as.numeric(canonical_path), Mapped_Tree = as.numeric(tested_path))
             
-            # Apply the surgical swap
+            # Extract the age from the targeted Trait (e.g., "Ht_10" -> "10")
+            target_age <- str_extract(rule$Trait_ID, "\\d+$")
+            
+            # Apply the surgical swap to ALL traits sharing that Age in that Plot
             exp_data_long <- exp_data_long %>%
               left_join(translation_df, by = c("Tree" = "Original_Tree")) %>%
-              mutate(Tree = if_else(Plot == rule$Plot & Trait == rule$Trait_ID & !is.na(Mapped_Tree), Mapped_Tree, Tree)) %>%
+              mutate(Tree = if_else(
+                Plot == rule$Plot & 
+                  str_detect(Trait, paste0("_", target_age, "$")) & 
+                  !is.na(Mapped_Tree), 
+                Mapped_Tree, Tree
+              )) %>%
               select(-Mapped_Tree)
             
             # Log the action so it appears in the final Validation_record column
