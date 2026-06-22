@@ -65,7 +65,7 @@ parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
       Control_Name = if_else(Is_Control, str_trim(str_replace(Clean_Seedlot, control_regex, "")), NA_character_),
       Family_name = case_when(
         !is.na(Control_Name) ~ paste0(prefix_low, Control_Name),
-        !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0(prefix_low, Maternal_ID, "_OPCB"),
+        !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0(prefix_low, Maternal_ID,"_", Paternal_ID),
         !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0(prefix_low, Maternal_ID, "_", prefix_low, Paternal_ID),
         is.na(Seedlot) ~ paste0(exp_prefix, "_Filler"), TRUE ~ paste0(exp_prefix, "_Filler")
       )
@@ -962,6 +962,14 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
         dropped_records <- sum(is.na(final_wide_with_flags$Family_name))
         if (dropped_records > 0) {
           message(paste("    -> WARNING: Dropping", dropped_records, "records missing Family/Block data (likely omitted from Design file)."))
+          # --- NEW: DIAGNOSTIC EXPORT ---
+          # Save the exact rows being dropped to the trial folder so you can see why they failed
+          orphan_path <- file.path(exp_path, paste0(str_replace_all(curr_exp, " ", "_"), "_Orphaned_Records.csv"))
+          write_csv(orphaned_records, orphan_path)
+          message(paste("       [!] Evidence saved: Open '", basename(orphan_path), "' to inspect the dropped plots."))
+          # ------------------------------
+          
+          # Proceed with dropping them from the main export
           final_wide_with_flags <- final_wide_with_flags %>% filter(!is.na(Family_name))
         }
       }
