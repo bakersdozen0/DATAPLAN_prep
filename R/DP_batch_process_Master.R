@@ -873,6 +873,15 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
       if(!is.null(genetic_info)) final_wide_with_flags <- left_join(final_wide_with_flags, genetic_info %>% mutate(Plot=as.character(Plot)), by = "Plot")
       if(!is.null(spatial_info)) final_wide_with_flags <- left_join(final_wide_with_flags, spatial_info, by = c("Plot", "Tree"))
       
+      # Drop plots that failed the genetic join (cannot be imported to DMS)
+      if ("Family_name" %in% names(final_wide_with_flags)) {
+        dropped_records <- sum(is.na(final_wide_with_flags$Family_name))
+        if (dropped_records > 0) {
+          message(paste("    -> WARNING: Dropping", dropped_records, "records missing Family/Block data (likely omitted from Design file)."))
+          final_wide_with_flags <- final_wide_with_flags %>% filter(!is.na(Family_name))
+        }
+      }
+      
       metadata_cols <- c("Validation_record", "Alive", "Block", "SubBlock", "Family_name", "Prow", "Ppos")
       existing_meta_cols <- intersect(metadata_cols, names(final_wide_with_flags))
       
