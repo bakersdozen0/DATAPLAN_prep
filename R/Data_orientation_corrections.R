@@ -3,9 +3,9 @@
 # ============================================================================
 
 
-# ============================================================================
+#
 #### 2. VIRTUAL ASSESSOR MATH ENGINE ####
-# ============================================================================
+# 
 get_grid_layout <- function(n_rows, n_cols, interior_only = FALSE) {
   if (n_rows == 1 && n_cols == 8) return(matrix(1:8, nrow=1))
   mat <- matrix(1:(n_rows*n_cols), nrow=n_rows, byrow=TRUE)
@@ -40,9 +40,9 @@ get_traversal_path <- function(layout_mat, start_corner="top_left", direction="h
   return(path)
 }
 
-# ============================================================================
+#
 #### 3. BATCH PROCESSING LOOP ####
-# ============================================================================
+# 
 run_traversal_audit <- function(wide_data_csv, plot_type, baseline_trait, test_traits, grid_rows = 8, grid_cols = 1, expect_negative_cor = FALSE, use_corrected_data = FALSE) {
   
   message(paste("Loading master data from:", basename(wide_data_csv)))
@@ -216,11 +216,16 @@ for (TEST_TRAIT in test_traits) {
   global_override_triggered <- FALSE
   holdout_plots <- c()
   
-  if (nrow(fix_tally) > 0 && (fix_tally$Votes[1] / total_plots) >= 0.60) {
+  if (nrow(fix_tally) > 0 && ((fix_tally$Votes[1] / total_plots) >= 0.60 || force_global_override)) {
     winning_path <- fix_tally[1, ]
     global_override_triggered <- TRUE
-    message(sprintf("\n*** GLOBAL CONSENSUS DETECTED ***\n%s plots (%.1f%%) suggest '%s'. Overriding all plot-level filters to apply globally!\n", 
-                    winning_path$Votes, (winning_path$Votes / total_plots)*100, winning_path$Path_Name))
+    
+    if (force_global_override) {
+      message(sprintf("\n*** MANUAL GLOBAL OVERRIDE FORCED ***\nApplying the most popular fix ('%s' with %s votes) to all plots!\n", winning_path$Path_Name, winning_path$Votes))
+    } else {
+      message(sprintf("\n*** GLOBAL CONSENSUS DETECTED ***\n%s plots (%.1f%%) suggest '%s'. Overriding all plot-level filters to apply globally!\n", 
+                      winning_path$Votes, (winning_path$Votes / total_plots)*100, winning_path$Path_Name))
+    }
     
     organic_winners <- original_recs %>% filter(paste(start_corner, direction, snake) == winning_path$Path_Name, str_detect(Action_Required, "(?i)FIX")) %>% pull(Plot)
     holdout_plots <- setdiff(unique(working_data$Plot), organic_winners)
@@ -246,12 +251,12 @@ for (TEST_TRAIT in test_traits) {
   message("Generating visualization panels...")
   before_df <- working_data %>% select(Plot, Tree, Base_Val, Test_Val) %>% mutate(State = "1. Original Raw Data")
   
-  # 1. Build the "Organic Only" state (Before Global Consensus bullied the holdouts)
+  # 1. Build the "Organic Only" state
   organic_after_list <- list()
   if (global_override_triggered) {
     for (p in unique(working_data$Plot)) {
       p_data <- working_data %>% filter(Plot == p)
-      rec <- original_recs %>% filter(Plot == p) # Pulls from original_recs, not recommendations
+      rec <- original_recs %>% filter(Plot == p)
       
       if (nrow(rec) == 1 && str_detect(rec$Action_Required, "(?i)FIX")) {
         p_rows <- grid_rows; p_cols <- grid_cols
@@ -260,16 +265,12 @@ for (TEST_TRAIT in test_traits) {
           if(nrow(sp_data) > 0) { p_rows <- max(sp_data$Map_Row) - min(sp_data$Map_Row) + 1; p_cols <- max(sp_data$Map_Pos) - min(sp_data$Map_Pos) + 1 }
         }
         trait_trees <- p_data %>% filter(!is.na(Test_Val)) %>% pull(Tree) %>% unique() %>% as.numeric()
-        
         layout_interior <- as.vector(get_grid_layout(p_rows, p_cols, interior_only = TRUE))
-        
         is_trait_interior <- (length(layout_interior) > 0 && length(trait_trees) > 0 && all(trait_trees %in% layout_interior))
-        
         layout_mat <- get_grid_layout(p_rows, p_cols, interior_only = is_trait_interior)
         canonical_path <- get_traversal_path(layout_mat, "top_left", "horizontal", FALSE)
         
         tested_path <- get_traversal_path(layout_mat, rec$start_corner, rec$direction, as.logical(rec$snake))
-        
         translation_df <- tibble(Original_Tree = as.numeric(canonical_path), Mapped_Tree = as.numeric(tested_path))
         fixed_test <- p_data %>% select(Tree, Test_Val) %>% inner_join(translation_df, by = c("Tree" = "Original_Tree"))
         organic_after_list[[length(organic_after_list) + 1]] <- p_data %>% select(Plot, Tree, Base_Val) %>% left_join(fixed_test, by = c("Tree" = "Mapped_Tree"))
@@ -278,69 +279,64 @@ for (TEST_TRAIT in test_traits) {
       }
     }
   }
-  organic_after_df <- bind_rows(organic_after_list)
+  organic_after_df <- bind_rows(organic_after_list) %>% mutate(State = "2. Organic Plot-by-Plot Fixes")
   
-  # 2. Build the Final State (After Global Consensus forces ALL plots)
+  # 2. Build the Final State (Targeted or Global Override)
   after_list <- list()
   for (p in unique(working_data$Plot)) {
     p_data <- working_data %>% filter(Plot == p)
     rec <- recommendations %>% filter(Plot == p)
     if (nrow(rec) == 1 && !str_detect(rec$Action_Required, "(?i)None")) {
-      
       p_rows <- grid_rows; p_cols <- grid_cols
       if (exists("plot_spatial_trees")) {
         sp_data <- plot_spatial_trees %>% filter(Plot == p)
         if(nrow(sp_data) > 0) { p_rows <- max(sp_data$Map_Row) - min(sp_data$Map_Row) + 1; p_cols <- max(sp_data$Map_Pos) - min(sp_data$Map_Pos) + 1 }
       }
-       
       trait_trees <- p_data %>% filter(!is.na(Test_Val)) %>% pull(Tree) %>% unique() %>% as.numeric()
-      
       layout_interior <- as.vector(get_grid_layout(p_rows, p_cols, interior_only = TRUE))
-      
       is_trait_interior <- (length(layout_interior) > 0 && length(trait_trees) > 0 && all(trait_trees %in% layout_interior))
-      
       layout_mat <- get_grid_layout(p_rows, p_cols, interior_only = is_trait_interior)
       canonical_path <- get_traversal_path(layout_mat, "top_left", "horizontal", FALSE)
       
       tested_path <- get_traversal_path(layout_mat, rec$Best_Start, rec$Best_Dir, as.logical(rec$Best_Snake))
       translation_df <- tibble(Original_Tree = as.numeric(canonical_path), Mapped_Tree = as.numeric(tested_path))
-      
       fixed_test <- p_data %>% select(Tree, Test_Val) %>% inner_join(translation_df, by = c("Tree" = "Original_Tree"))
       after_list[[length(after_list) + 1]] <- p_data %>% select(Plot, Tree, Base_Val) %>% left_join(fixed_test, by = c("Tree" = "Mapped_Tree"))
     } else {
       after_list[[length(after_list) + 1]] <- p_data %>% select(Plot, Tree, Base_Val, Test_Val)
     }
   }
-  after_df <- bind_rows(after_list) %>% mutate(State = "2. Targeted Fixes")
+  after_df <- bind_rows(after_list) %>% mutate(State = if(global_override_triggered) "3. Global Consensus Override" else "2. Targeted Fixes")
   
-  plot_df <- bind_rows(before_df, after_df) %>% filter(!is.na(Base_Val) & !is.na(Test_Val))
+  # Combine & Plot
+  plot_df <- if (global_override_triggered) {
+    bind_rows(before_df, organic_after_df, after_df) %>% filter(!is.na(Base_Val) & !is.na(Test_Val))
+  } else {
+    bind_rows(before_df, after_df) %>% filter(!is.na(Base_Val) & !is.na(Test_Val))
+  }
+  
   calc_cor <- function(df) round(cor(df$Base_Val, df$Test_Val, use = "pairwise.complete.obs", method = "spearman"), 3)
-  
   cor_before <- calc_cor(before_df)
   cor_after <- calc_cor(after_df)
   
-  subtitle_text <- sprintf("Trial Correlations  ->  Raw: %s  |  Targeted Fix: %s", cor_before, cor_after)
-  
-  # 3. Inject the new Global Proof comparing Organic vs Forced
-  if (global_override_triggered && length(holdout_plots) > 0) {
-    if (sum(!is.na(organic_after_df$Base_Val) & !is.na(organic_after_df$Test_Val)) >= 3) {
-      cor_organic <- calc_cor(organic_after_df)
-      subtitle_text <- sprintf("%s\n[GLOBAL PROOF] Trial w/ Organic Fixes Only: %s  ->  w/ Holdouts Forced: %s", 
-                               subtitle_text, cor_organic, cor_after)
-    }
+  if (global_override_triggered) {
+    cor_organic <- calc_cor(organic_after_df)
+    subtitle_text <- sprintf("Trial Correlations | Raw: %s | Organic Plot-by-Plot: %s | Global Override: %s", cor_before, cor_organic, cor_after)
+  } else {
+    subtitle_text <- sprintf("Trial Correlations | Raw: %s | Targeted Fix: %s", cor_before, cor_after)
   }
   
   p_compare <- ggplot(plot_df, aes(x = Base_Val, y = Test_Val)) +
     geom_point(alpha = 0.5, size=0.25, color = "#2c3e50") +
     geom_smooth(method = "lm", formula = y ~ x, color = "#e74c3c", linetype = "dashed", se = FALSE) +
-    facet_wrap(~State, ncol = 2) + theme_bw() +
+    facet_wrap(~State, ncol = if(global_override_triggered) 3 else 2) + theme_bw() +
     labs(title = paste("Plot Traversal Correction:", baseline_trait, "vs", TEST_TRAIT), 
          subtitle = subtitle_text, 
          x = paste("Trusted Baseline:", baseline_trait), y = paste("Suspected Trait:", TEST_TRAIT))
   
-  ggsave(file.path(DIAG_DIR, paste0(baseline_trait, "_vs_", TEST_TRAIT, out_suffix, "_Correction_Plot.png")), plot = p_compare, width = 12, height = 6, dpi = 300)
-  
-  # --- Field Spatial Map of Traversal Patterns ---
+  ggsave(file.path(DIAG_DIR, paste0(baseline_trait, "_vs_", TEST_TRAIT, out_suffix, "_Correction_Plot.png")), plot = p_compare, width = if(global_override_triggered) 16 else 12, height = 6, dpi = 300)
+
+    # --- Field Spatial Map of Traversal Patterns ---
   if (exists("plot_spatial_trees") && nrow(recommendations %>% filter(str_detect(Action_Required, "FIX|OVERRIDE"))) > 0) {
     message("Generating spatial map of field traversals...")
     

@@ -50,6 +50,7 @@ GRID_ROWS           <- 8
 GRID_COLS           <- 1
 EXPECT_NEGATIVE_COR <- FALSE
 USE_CORRECTED_DATA  <- FALSE
+FORCE_GLOBAL_OVERRIDE <- FALSE
 
 # PEDIGREE SPECIFIC
 HAS_EXISTING_DB <- TRUE 
@@ -82,7 +83,8 @@ run_traversal_audit(
   grid_rows           = GRID_ROWS,
   grid_cols           = GRID_COLS,
   expect_negative_cor = EXPECT_NEGATIVE_COR,
-  use_corrected_data  = USE_CORRECTED_DATA
+  use_corrected_data  = USE_CORRECTED_DATA,
+  force_global_override = FORCE_GLOBAL_OVERRIDE
 )
 
 # 2.5 PEDIGREE PRE-FLIGHT DIAGNOSTICS
