@@ -646,8 +646,17 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
       
       # Map Trees (Bypass for Single-Tree)
       if(plot_type == "MULTI") {
+        
+        # --- NEW: Get true plot size from Matrix if available ---
+        if (!is.null(spatial_info)) {
+          spatial_maxes <- spatial_info %>% group_by(Plot) %>% summarise(True_Max = max(Tree, na.rm = TRUE), .groups = "drop")
+          exp_data_long <- exp_data_long %>% left_join(spatial_maxes, by = "Plot") %>%
+            group_by(Plot) %>% mutate(Max_Trees_Planted = coalesce(True_Max, max(Tree_Orig_Num, na.rm = TRUE))) %>% select(-True_Max)
+        } else {
+          exp_data_long <- exp_data_long %>% group_by(Plot) %>% mutate(Max_Trees_Planted = max(Tree_Orig_Num, na.rm = TRUE))
+        }
+        
         exp_data_long <- exp_data_long %>%
-          group_by(Plot) %>% mutate(Max_Trees_Planted = max(Tree_Orig_Num, na.rm = TRUE)) %>% 
           group_by(Plot, Trait_Orig) %>% mutate(Trees_in_Subset = max(Tree_Orig_Num, na.rm = TRUE), Tree = purrr::pmap_dbl(list(Tree_Orig_Num, Trees_in_Subset, Max_Trees_Planted), map_interior_trees)) %>%
           ungroup() %>% select(-Tree_Orig_Num, -Max_Trees_Planted, -Trees_in_Subset)
       } else {
@@ -825,22 +834,26 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
       
       # --- 6. Survival Calc ---
       if(!is.null(spatial_info)) {
+        
+        # NEW: Build a roster of ONLY the trees that were actually measured
+        assessed_roster <- exp_data_long %>% select(Plot, Tree) %>% distinct()
+        
         raw_ages <- unique(na.omit(exp_data_long$Age))
         unique_ages <- raw_ages[!raw_ages %in% c("1", "01")]
         sur_list <- list()
+        
         for(curr_age in unique_ages) {
           t_name <- paste0("Sur_", curr_age)
           if(t_name %in% unique(exp_data_long$Trait)) next
           
-          # NOTE: Included the "Fr" exemption we added earlier!
           alive_trees <- exp_data_long %>% filter(Age == curr_age, !is.na(Value_Num), (Value_Num != 0 | str_detect(Trait, "(?i)^Fr"))) %>% select(Plot, Tree) %>% distinct() %>% mutate(is_alive = TRUE)
           
-          sur_df <- spatial_info %>% select(Plot, Tree) %>% left_join(alive_trees, by = c("Plot", "Tree")) %>%
+          # NEW: Join against the Assessed Roster, not the full Spatial Info
+          sur_df <- assessed_roster %>% left_join(alive_trees, by = c("Plot", "Tree")) %>%
             mutate(Trait = t_name, Age = curr_age, is_alive = replace_na(is_alive, FALSE), Value_Num = if_else(is_alive, 1, 0), Value_Char = as.character(Value_Num), UnitCode = "$1-1", Trait_Orig = paste0("Calculated_", t_name), Prefix = "SUR", Date = as.Date(NA)) %>% select(-is_alive)
           sur_list[[t_name]] <- sur_df
         }
         if(length(sur_list) > 0) exp_data_long <- bind_rows(exp_data_long, bind_rows(sur_list))
-        
       } else {
         
         # --- FALLBACK SYNTHETIC ROSTER FOR MATRIX-LESS TRIALS ---
@@ -922,16 +935,28 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
       }
       
       data_wide_clean <- final_long_dedup %>% select(Plot, Tree, Trait, Value_Char) %>% pivot_wider(names_from = Trait, values_from = Value_Char)
+      
+      # Keep this! Needed for the PDF generation and Correlation Matrix
       exp_data_wide_numeric <- final_long_dedup %>% select(Plot, Tree, Trait, Value_Num) %>% pivot_wider(names_from = Trait, values_from = Value_Num)
-      if (!is.null(spatial_info)) exp_data_wide_numeric <- left_join(exp_data_wide_numeric, spatial_info, by = c("Plot", "Tree"))
+      if (!is.null(spatial_info)) exp_data_wide_numeric <- full_join(exp_data_wide_numeric, spatial_info, by = c("Plot", "Tree"))
       
       flags_wide <- final_long_dedup %>% select(Plot, Tree, Trait, Reject_Flag) %>% pivot_wider(names_from = Trait, values_from = Reject_Flag, names_glue = "{Trait}_reject")
       
-      final_wide_with_flags <- left_join(data_wide_clean, flags_wide, by = c("Plot", "Tree")) %>% left_join(validation_summary, by = c("Plot", "Tree"))
-      if(!is.null(alive_summary)) final_wide_with_flags <- left_join(final_wide_with_flags, alive_summary, by = c("Plot", "Tree"))
-      if(!is.null(genetic_info)) final_wide_with_flags <- left_join(final_wide_with_flags, genetic_info %>% mutate(Plot=as.character(Plot)), by = "Plot")
-      if(!is.null(spatial_info)) final_wide_with_flags <- left_join(final_wide_with_flags, spatial_info, by = c("Plot", "Tree"))
+      # 1. Base Join (Changed to full_join to preserve everything)
+      final_wide_with_flags <- full_join(data_wide_clean, flags_wide, by = c("Plot", "Tree"))
       
+      # 2. INJECT ALL SPATIAL TREES (Including Buffer Trees) via Full Join
+      if(!is.null(spatial_info)) {
+        final_wide_with_flags <- full_join(final_wide_with_flags, spatial_info, by = c("Plot", "Tree"))
+      }
+      
+      # 3. Add Metadata
+      if(!is.null(validation_summary)) final_wide_with_flags <- left_join(final_wide_with_flags, validation_summary, by = c("Plot", "Tree"))
+      if(!is.null(alive_summary)) final_wide_with_flags <- left_join(final_wide_with_flags, alive_summary, by = c("Plot", "Tree"))
+      
+      # Because genetic_info joins on "Plot", it applies the Family Name to the newly added Buffer trees!
+      if(!is.null(genetic_info)) final_wide_with_flags <- left_join(final_wide_with_flags, genetic_info %>% mutate(Plot=as.character(Plot)), by = "Plot")
+
       # Drop plots that failed the genetic join (cannot be imported to DMS)
       if ("Family_name" %in% names(final_wide_with_flags)) {
         dropped_records <- sum(is.na(final_wide_with_flags$Family_name))
