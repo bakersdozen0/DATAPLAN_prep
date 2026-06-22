@@ -619,7 +619,7 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
         }
       }
       
-      # FIX: Strip out PowerBI footers and blank rows BEFORE checking for duplicates!
+      # Strip out PowerBI footers and blank rows BEFORE checking for duplicates!
       raw_data <- raw_data %>% filter(!is.na(Plot), !is.na(Measurement))
       
       # Duplicate Checks
@@ -831,8 +831,40 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
         for(curr_age in unique_ages) {
           t_name <- paste0("Sur_", curr_age)
           if(t_name %in% unique(exp_data_long$Trait)) next
+          
+          # NOTE: Included the "Fr" exemption we added earlier!
           alive_trees <- exp_data_long %>% filter(Age == curr_age, !is.na(Value_Num), (Value_Num != 0 | str_detect(Trait, "(?i)^Fr"))) %>% select(Plot, Tree) %>% distinct() %>% mutate(is_alive = TRUE)
+          
           sur_df <- spatial_info %>% select(Plot, Tree) %>% left_join(alive_trees, by = c("Plot", "Tree")) %>%
+            mutate(Trait = t_name, Age = curr_age, is_alive = replace_na(is_alive, FALSE), Value_Num = if_else(is_alive, 1, 0), Value_Char = as.character(Value_Num), UnitCode = "$1-1", Trait_Orig = paste0("Calculated_", t_name), Prefix = "SUR", Date = as.Date(NA)) %>% select(-is_alive)
+          sur_list[[t_name]] <- sur_df
+        }
+        if(length(sur_list) > 0) exp_data_long <- bind_rows(exp_data_long, bind_rows(sur_list))
+        
+      } else {
+        
+        # --- FALLBACK SYNTHETIC ROSTER FOR MATRIX-LESS TRIALS ---
+        message("   -> No Spatial Matrix found: Generating synthetic tree roster for survival calculations.")
+        
+        # 1. Build a roster from 1 to the highest Tree ID ever seen in each plot
+        synthetic_roster <- exp_data_long %>%
+          group_by(Plot) %>%
+          summarise(Max_Tree = max(Tree, na.rm = TRUE), .groups = "drop") %>%
+          uncount(Max_Tree, .id = "Tree")
+        
+        raw_ages <- unique(na.omit(exp_data_long$Age))
+        unique_ages <- raw_ages[!raw_ages %in% c("1", "01")]
+        sur_list <- list()
+        
+        for(curr_age in unique_ages) {
+          t_name <- paste0("Sur_", curr_age)
+          if(t_name %in% unique(exp_data_long$Trait)) next
+          
+          # Find who was alive this year
+          alive_trees <- exp_data_long %>% filter(Age == curr_age, !is.na(Value_Num), (Value_Num != 0 | str_detect(Trait, "(?i)^Fr"))) %>% select(Plot, Tree) %>% distinct() %>% mutate(is_alive = TRUE)
+          
+          # Cross-reference against the synthetic roster instead of the spatial matrix
+          sur_df <- synthetic_roster %>% left_join(alive_trees, by = c("Plot", "Tree")) %>%
             mutate(Trait = t_name, Age = curr_age, is_alive = replace_na(is_alive, FALSE), Value_Num = if_else(is_alive, 1, 0), Value_Char = as.character(Value_Num), UnitCode = "$1-1", Trait_Orig = paste0("Calculated_", t_name), Prefix = "SUR", Date = as.Date(NA)) %>% select(-is_alive)
           sur_list[[t_name]] <- sur_df
         }
