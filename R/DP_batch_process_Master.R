@@ -640,7 +640,7 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
           Tree_Orig_Num = suppressWarnings(as.numeric(Tree_Orig)), 
           Value_Num = suppressWarnings(as.numeric(Value_Char)),
           Prefix = str_to_upper(str_trim(replace_na(TraitCode, ""))),
-          Age = str_pad(as.character(Age), width = 2, pad = "0"), # <--- FORCES LEADING ZEROS
+          Age = str_pad(as.character(Age), width = 2, pad = "0"), 
           Date = as.Date(NA), Trait_Orig = paste0(Prefix, replace_na(UnitCode, ""), Age)
         )
       
@@ -705,9 +705,9 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
       
       exp_data_long <- exp_data_long %>% mutate(Trait = str_to_title(Trait))
       
-      # --------------------------------------------------------------------------
-      # NEW: Raw ASCII Text Recovery (.txt files)
-      # --------------------------------------------------------------------------
+      #
+      # Raw ASCII Text Recovery (.txt files)
+      # 
       txt_files <- dir_ls(exp_path, regexp = "(?i)/[A-Za-z]+_\\d+\\.txt$")
         if (length(txt_files) > 0) {
         for (txt_path in txt_files) {
