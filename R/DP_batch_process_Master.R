@@ -882,7 +882,10 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
         }
       }
       
-      metadata_cols <- c("Validation_record", "Alive", "Block", "SubBlock", "Family_name", "Prow", "Ppos")
+      final_wide_with_flags <- final_wide_with_flags %>%
+        mutate(Ploc = str_replace_all(curr_exp, " ", ""))
+      
+      metadata_cols <- c("Ploc","Validation_record", "Alive", "Block", "SubBlock", "Family_name", "Prow", "Ppos")
       existing_meta_cols <- intersect(metadata_cols, names(final_wide_with_flags))
       
       col_sorting_df <- tibble(col_name = setdiff(names(final_wide_with_flags), c("Plot", "Tree", metadata_cols))) %>%
