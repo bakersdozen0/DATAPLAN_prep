@@ -81,7 +81,11 @@ The script dynamically trawls the `TRIAL_SERIES` folder for:
 
 To ensure pipeline stability and prevent crashes during ingestion, adhere to the following data formatting assumptions:
 * **Matrix CSV Preferences:** This code preferentially improts `_Matrix.csv` over `_layout.xslx` for Matrix files, however barring a `_Matrix.csv` it will fall back to the `_layout.xlxs` import. This was to a) prevent JV from renaming all thier `_layout.xlsx` sheets, while also avoiding the `_layout.xlsx` sheets that contain the excel formulas whichJB used to generate the `_Matrix.csv`
-*  **NB: USERS SHOULD DEFAULT TO PREPARING AND USING `_Matrix.csv` files for clarity.   
+*  **NB: USERS SHOULD DEFAULT TO PREPARING AND USING `_Matrix.csv` files for clarity.
+*  Legacy _DF.txt and Extensionless Design Files: The parser (parse_long_design_file) uses highly rigid logic to read text-based design files. If you receive a warning that thousands of records were dropped due to "missing Family/Block data", your design file likely violated one of these rules:
+Mandatory Headers: The file must contain the exact, uppercase words TREATMENTS and PLOTS on their own lines. If missing, misspelled, or lowercase, the parser aborts.
+Cross Formatting: Crosses must contain an equals sign (e.g., 12=...) and follow standard spacing limits.
+Plot Delimiters: The data block under PLOTS must strictly follow either a comma-separated format (Plot,Block,SubBlock Design_ID) or a colon format (Plot: Design_ID Block SubBlock). If tabs are used instead of commas/spaces, the regex will fail to link the family data.
 
 ### 📊 Main Pipeline Outputs
 *(The `_Corrected` suffix is automatically appended ONLY if spatial logic was successfully applied).*
