@@ -171,7 +171,7 @@ extract_op_instances <- function(target_dir, species_code) {
         rename(Family_name = all_of(fam_col[1])) %>% 
         select(Family_name) %>% 
         distinct() %>% 
-        filter(str_detect(Family_name, "(?i)OP")) %>% 
+        filter(str_detect(Family_name, "(?i)OP|\\bPO(?:\\d{2,}[A-Za-z]+)?\\b")) %>%
         mutate(Experiment_Name = str_replace_all(str_extract(basename(file), "^[^_]+"), " ", "_"))
     })
   

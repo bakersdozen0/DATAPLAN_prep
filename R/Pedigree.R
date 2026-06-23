@@ -113,13 +113,13 @@ run_pedigree_builder <- function(base_dir, pending_dir, existing_dir, species_co
       mutate(
         Mum_name = str_extract(Family_name, "^[^_]+"), Mum_type = "I",
         Raw_Dad = str_extract(Family_name, "(?<=_).*"),
-        Is_OPCB = str_detect(Raw_Dad, "(?i)OP"),
+        Is_OPCB = str_detect(Raw_Dad, "[A-Za-z]"), # Any letter means it's a Group/Mix
         Dad_type = if_else(Is_OPCB, "G", "I"),
         Dad_name = case_when(Is_OPCB ~ "Unknown", TRUE ~ Raw_Dad),
         Dad_id = NA_character_,
         Stage = 4,
         Fam_description = case_when(
-          Is_OPCB ~ paste("Open pollinated family from", Mum_name, "in unknown clone bank"),
+          Is_OPCB ~ paste("Open pollinated / Polymix family from", Mum_name, "in unknown clone bank"),
           is_target_batch ~ "Target batch parents control pollinated",
           TRUE ~ paste("Control pollinated family", Mum_name, "x", Dad_name)
         )
