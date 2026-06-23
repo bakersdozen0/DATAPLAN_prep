@@ -58,6 +58,8 @@ parse_long_design_file <- function(filepath, exp_prefix, spp_code) {
   final_design <- plot_df %>% left_join(trt_df, by = "Design_ID") %>%
     mutate(
       Plot = as.numeric(Plot),
+      Block = as.character(Block),      
+      SubBlock = as.character(SubBlock),
       Family_name = case_when(
         Design_ID == 0 ~ paste0(exp_prefix, "_Filler"),
         !is.na(Control_Name) ~ paste0(prefix_low, Control_Name),
@@ -499,7 +501,12 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
       
       # --- 3. Load Design ---
       design_files <- fs::dir_ls(exp_path, regexp = "(?i)_DF(\\.txt|\\.xlsx|\\.)?$")
+      
+      # Filter out wide-form 'V_DF' files
+      design_files <- design_files[!str_detect(design_files, "(?i)V_DF")]
+      
       if (length(design_files) > 0) {
+      
         design_path <- if(any(str_detect(design_files, "(?i)\\.xlsx$"))) design_files[str_detect(design_files, "(?i)\\.xlsx$")][1] else design_files[1]
         message(paste("  -> Loading Design:", basename(design_path)))
         
