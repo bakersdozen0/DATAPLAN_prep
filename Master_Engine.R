@@ -33,7 +33,7 @@ source(here("R", "ASCII_diagnostics.R"))
 BASE_DIR      <- "Z:/CSFCC/Forest Resource and Product Assessment and Improvement/NRS-Tree Improvement/CONIFERS/SITKA SPRUCE/psi_DATAPLAN_prep/Latest_Series"
 TRIAL_SERIES  <- "SS P91 5 Polycrosses" # "High GCA Fullsib P85-P87 experiments" / "Backwards selected Fullsib P96-P99 experiments"/ "Population_Studies" /"Trials" / "Diallel"
 TARGET_DIR    <- file.path(BASE_DIR, TRIAL_SERIES) # for user legibility 
-TARGET_TRIALS <- c("Newtown 5") # set to NULL to run on all experiments in trial_series directory, or to a list of trials that you want to test: e.g. c("Craigellachie 49", "Ae 58")
+TARGET_TRIALS <- NULL # set to NULL to run on all experiments in trial_series directory, or to a list of trials that you want to test: e.g. c("Craigellachie 49", "Ae 58")
 
 PLOT_TYPE     <- "MULTI" # Refering to number of trees per plot "SINGLE" or "MULTI"
 SPECIES_CODE  <- "SS"    # this is FR notation ( "SS" or "SP" )
