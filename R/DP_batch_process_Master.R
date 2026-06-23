@@ -3,6 +3,7 @@
 # # # # # # # # # # # # # # # # # # # # # # # 
 # PART 0: HELPER FUNCTIONS #### 
 # # # # # # # # # # # # # # # # # # # # # # # 
+
 # --- 1a. Parse Design File (TXT / No Extension) ---
 parse_long_design_file <- function(filepath, exp_prefix, spp_code) {
   raw_lines <- readLines(filepath)
@@ -28,20 +29,45 @@ parse_long_design_file <- function(filepath, exp_prefix, spp_code) {
     )
   
   plot_lines <- raw_lines[(plot_start + 1):length(raw_lines)]
-  plot_lines <- plot_lines[grep("^[0-9]+,[0-9]+,[0-9]+", plot_lines)]
-  plot_df <- tibble(line = plot_lines) %>%
-    extract(line, into = c("Plot", "Block", "SubBlock", "Design_ID"), regex = "^(\\d+),(\\d+),(\\d+)\\s+(\\d+)", convert = TRUE)
   
+  # Filter for lines that start with digits, then either a comma or colon
+  plot_lines <- plot_lines[grep("^\\s*[0-9]+[:,]\\s*[0-9]+", plot_lines)]
+  
+  plot_df <- tibble(line = plot_lines) %>%
+    mutate(line = str_trim(line)) %>%
+    
+    # Format A: Plot,Block,SubBlock Design_ID (e.g., "1,1,0 12")
+    extract(line, into = c("Plot_A", "Block_A", "SubBlock_A", "Design_ID_A"), 
+            regex = "^(\\d+),(\\d+),(\\d+)\\s+(\\d+)", convert = TRUE, remove = FALSE) %>%
+    
+    # Format B: Plot: Design_ID Block SubBlock (e.g., "1: 7 1 1")
+    extract(line, into = c("Plot_B", "Design_ID_B", "Block_B", "SubBlock_B"), 
+            regex = "^(\\d+):\\s*(\\d+)\\s+(\\d+)\\s+(\\d+)", convert = TRUE, remove = FALSE) %>%
+    
+    # Merge the results, preferring Format A, falling back to Format B
+    mutate(
+      Plot = coalesce(Plot_A, Plot_B),
+      Block = coalesce(Block_A, Block_B),
+      SubBlock = coalesce(SubBlock_A, SubBlock_B),
+      Design_ID = coalesce(Design_ID_A, Design_ID_B)
+    ) %>%
+    filter(!is.na(Plot)) %>%
+    select(Plot, Block, SubBlock, Design_ID)
+  
+  # THE MISSING PIECE: Joining the data and generating Family_name
   final_design <- plot_df %>% left_join(trt_df, by = "Design_ID") %>%
     mutate(
       Plot = as.numeric(Plot),
       Family_name = case_when(
         Design_ID == 0 ~ paste0(exp_prefix, "_Filler"),
         !is.na(Control_Name) ~ paste0(prefix_low, Control_Name),
-        !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0(prefix_low, Maternal_ID, "_", Paternal_ID),        !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0(prefix_low, Maternal_ID, "_", prefix_low, Paternal_ID),
+        # If the Dad has ANY letters, assume it's a special mix (OP, PO, OR, etc.) and don't add the species code
+        !is.na(Paternal_ID) & str_detect(Paternal_ID, "[A-Za-z]") ~ paste0(prefix_low, Maternal_ID, "_", Paternal_ID),
+        !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0(prefix_low, Maternal_ID, "_", prefix_low, Paternal_ID),
         TRUE ~ str_replace_all(Cross_Name, "\\s+", "") %>% str_replace(paste0("^", spp_code), paste0(prefix_low, "_"))
       )
     ) %>% select(Plot, Block, SubBlock, Family_name)
+  
   return(final_design)
 }
 
@@ -65,8 +91,8 @@ parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
       Control_Name = if_else(Is_Control, str_trim(str_replace(Clean_Seedlot, control_regex, "")), NA_character_),
       Family_name = case_when(
         !is.na(Control_Name) ~ paste0(prefix_low, Control_Name),
-        !is.na(Paternal_ID) & str_detect(Paternal_ID, "(?i)OP") ~ paste0(prefix_low, Maternal_ID,"_", Paternal_ID),
-        !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0(prefix_low, Maternal_ID, "_", prefix_low, Paternal_ID),
+        # If the Dad has ANY letters, assume it's a special mix (OP, PO, OR, etc.) and don't add the species code
+        !is.na(Paternal_ID) & str_detect(Paternal_ID, "[A-Za-z]") ~ paste0(prefix_low, Maternal_ID, "_", Paternal_ID),
         is.na(Seedlot) ~ paste0(exp_prefix, "_Filler"), TRUE ~ paste0(exp_prefix, "_Filler")
       )
     )
@@ -496,10 +522,17 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
         message("  -> NO DESIGN FILE FOUND. Proceeding without genetic info.")
       }
       
-      # --- 4. Load Spatial Matrix ---
+      # --- 4. Load Spatial Matrix, with preference for Matrix.csv over layout.xlsx ---
       matrix_files <- dir_ls(exp_path, regexp = "(?i)_(Matrix\\.csv|layout\\.xlsx)$")
       if (length(matrix_files) > 0) {
-        matrix_path <- matrix_files[1]
+        
+        # Prioritize Matrix.csv if both are present
+        csv_matches <- grep("(?i)Matrix\\.csv$", matrix_files, value = TRUE)
+        matrix_path <- if (length(csv_matches) > 0) csv_matches[1] else matrix_files[1]
+        
+        message(paste("  -> Loading Spatial Matrix:", basename(matrix_path)))
+        
+        # 2. Fork the reader based on the file extension
         
         # 2. Fork the reader based on the file extension
         if (str_detect(matrix_path, "(?i)\\.xlsx$")) {
@@ -647,7 +680,7 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
       # Map Trees (Bypass for Single-Tree)
       if(plot_type == "MULTI") {
         
-        # --- NEW: Get true plot size from Matrix if available ---
+        # --- Get true plot size from Matrix if available ---
         if (!is.null(spatial_info)) {
           spatial_maxes <- spatial_info %>% group_by(Plot) %>% summarise(True_Max = max(Tree, na.rm = TRUE), .groups = "drop")
           exp_data_long <- exp_data_long %>% left_join(spatial_maxes, by = "Plot") %>%
@@ -962,12 +995,12 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
         dropped_records <- sum(is.na(final_wide_with_flags$Family_name))
         if (dropped_records > 0) {
           message(paste("    -> WARNING: Dropping", dropped_records, "records missing Family/Block data (likely omitted from Design file)."))
-          # --- NEW: DIAGNOSTIC EXPORT ---
+          
+          # ---DIAGNOSTIC EXPORT ---
           # Save the exact rows being dropped to the trial folder so you can see why they failed
+          orphaned_records <- final_wide_with_flags %>% filter(is.na(Family_name))
           orphan_path <- file.path(exp_path, paste0(str_replace_all(curr_exp, " ", "_"), "_Orphaned_Records.csv"))
           write_csv(orphaned_records, orphan_path)
-          message(paste("       [!] Evidence saved: Open '", basename(orphan_path), "' to inspect the dropped plots."))
-          # ------------------------------
           
           # Proceed with dropping them from the main export
           final_wide_with_flags <- final_wide_with_flags %>% filter(!is.na(Family_name))

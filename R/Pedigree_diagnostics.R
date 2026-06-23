@@ -61,7 +61,7 @@ summarize_parents <- function(df, batch_name) {
   if (nrow(df) == 0) return(tibble(batch = batch_name, unique_dams = 0, unique_sires = 0, total_unique_parent_trees = 0))
   
   # Filter out "OP" from sires so we don't count "OP" as a physical tree
-  clean_sires <- df$sire[!str_detect(df$sire, "(?i)OP") & !is.na(df$sire)]
+  clean_sires <- df$sire[!str_detect(df$sire, "[A-Za-z]") & !is.na(df$sire)]
   clean_dams <- df$dam[!is.na(df$dam)]
   
   tibble(
@@ -78,7 +78,7 @@ parse_family_types <- function(df) {
   df %>%
     mutate(
       family_type = case_when(
-        str_detect(family_name, "(?i)OP[A-Z]{0,2}") ~ "Open Pollinated (OP)",
+        str_detect(family_name, "(?i)OP[A-Z]{0,2}|\\bPO(?:\\d{2,}[A-Za-z]+)?\\b") ~ "Open Pollinated / Polymix",
         str_detect(family_name, "(?i)iller") ~ "Filler",
         dam == sire ~ "Control / Provenance / Founder", 
         TRUE ~ "Control Pollinated (CP)"
@@ -92,7 +92,7 @@ get_gen_from_families <- function(df, founders_df) {
   unique_genotypes <- unique(na.omit(c(df$dam, df$sire)))
   
   # Remove "OP" so it doesn't look for an "OP" tree in the founders list
-  unique_genotypes <- unique_genotypes[!str_detect(unique_genotypes, "(?i)OP")]
+  unique_genotypes <- unique_genotypes[!str_detect(unique_genotypes, "(?i)OP|\\bPO(?:\\d{2,}[A-Za-z]+)?\\b")]
   
   tibble(Genotype_name = unique_genotypes) %>% 
     left_join(founders_df %>% select(Genotype_name, GEN), by = "Genotype_name")
