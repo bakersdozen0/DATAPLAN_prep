@@ -55,7 +55,6 @@ run_pedigree_builder <- function(base_dir, pending_dir, existing_dir, species_co
           df %>% rename(Family_name = all_of(fam_col[1])) %>% select(Family_name) %>% distinct() %>% 
             mutate(
               Family_name = str_trim(Family_name),
-              Family_name = str_replace(Family_name, "(?i)_OPST$", "_OPCB"),
               Trial_id = trial_name
             )
         }) %>% drop_na(Family_name)
@@ -113,7 +112,11 @@ run_pedigree_builder <- function(base_dir, pending_dir, existing_dir, species_co
       mutate(
         Mum_name = str_extract(Family_name, "^[^_]+"), Mum_type = "I",
         Raw_Dad = str_extract(Family_name, "(?<=_).*"),
-        Is_OPCB = str_detect(Raw_Dad, "[A-Za-z]"), # Any letter means it's a Group/Mix
+        
+        # FIX: Strip the species code out before checking for OP/Mix letters
+        Clean_Dad = str_remove_all(tolower(Raw_Dad), tolower(species_code)),
+        Is_OPCB = str_detect(Clean_Dad, "[a-z]"), 
+        
         Dad_type = if_else(Is_OPCB, "G", "I"),
         Dad_name = case_when(Is_OPCB ~ "Unknown", TRUE ~ Raw_Dad),
         Dad_id = NA_character_,
@@ -245,26 +248,30 @@ run_pedigree_builder <- function(base_dir, pending_dir, existing_dir, species_co
       cat("\nWARNING: Missing GROUP parents:\n"); print(orphans_G)
     }
   }
+    # --- 7. EXPORT VERIFIED FILES ---
+  current_series <- basename(pending_dir)
   
-  # --- 7. EXPORT VERIFIED FILES ---
   # Groups: Drop Group_id
   write_csv(true_groups_export %>% select(-Group_id), 
-            file.path(base_dir, "Pedigree", paste0("Verified_", species_code, "_Groups_Import.csv")))
+            file.path(base_dir, "Pedigree", paste0("Verified_", current_series, "_", species_code, "_Groups_Import.csv")))
   
   # Genotypes: Drop Genotype_id and Family_id
   write_csv(true_genotypes_export %>% select(-Genotype_id, -Family_id), 
-            file.path(base_dir, "Pedigree", paste0("Verified_", species_code, "_Genotypes_Import.csv")))
+            file.path(base_dir, "Pedigree", paste0("Verified_", current_series, "_", species_code, "_Genotypes_Import.csv")))
   
   # Families: Drop Family_id, Mum_id, and Dad_id
   write_csv(true_families_export %>% select(-Family_id, -Mum_id, -Dad_id), 
-            file.path(base_dir, "Pedigree", paste0("Verified_", species_code, "_Families_Import.csv")))
-  
+            file.path(base_dir, "Pedigree", paste0("Verified_", current_series, "_", species_code, "_Families_Import.csv")))
   # --- 8. GENERATE COMPLETE FAMILIES ORIGIN FILE ---
   cat("\n--- CALCULATING COMPLETE FAMILY ORIGINS (MACRO-REGIONS & OPCB) ---\n")
   
-  db_fams_char <- db_fams %>% mutate(across(everything(), as.character))
-  universal_families <- bind_rows(
-    pending_tables$families %>% mutate(across(everything(), as.character)),
+  db_fams_char <- db_fams %>% 
+    janitor::clean_names() %>% 
+    rename(Family_name = family_name, Mum_name = mum_name, Dad_name = dad_name) %>%
+    mutate(across(everything(), as.character))
+  
+  all_families <- bind_rows(
+    pending_tables$families %>% mutate(across(everything(), as.character)), 
     db_fams_char
   ) %>% distinct(Family_name, .keep_all = TRUE)
   
@@ -358,9 +365,11 @@ run_pedigree_builder <- function(base_dir, pending_dir, existing_dir, species_co
       Dad_name, Dad_type, Dad_lat, Dad_orig, Dad_ro
     ) %>%
     arrange(primary_cause, Family_name)
+  current_series <- basename(pending_dir)
+  review_filename <- paste0(current_series, "_Unknown_Origins_Review.csv")
   
-  write_csv(families_to_review, file.path(base_dir, "Pedigree", "HighGCA_Unknown_Origins_Review.csv"))
-  cat("\nExported", nrow(families_to_review), "families to 'HighGCA_Unknown_Origins_Review.csv'\n")
+  write_csv(families_to_review, file.path(base_dir, "Pedigree", review_filename))
+  cat("\nExported", nrow(families_to_review), "families to", paste0("'", review_filename, "'\n"))
   
   cat("\n==========================================")
   cat("\nPlotting Pedigree Networks...")
@@ -370,9 +379,9 @@ run_pedigree_builder <- function(base_dir, pending_dir, existing_dir, species_co
   # PLOT 1: VERIFIED PENDING PEDIGREE ONLY   ####
   # # # # # # # # # # # # # # # # # # # # # # # #
   
-  families  <- read_csv(file.path(base_dir,"Pedigree", paste0("Verified_", species_code, "_Families_Import.csv")), show_col_types = FALSE)
-  genotypes <- read_csv(file.path(base_dir,"Pedigree", paste0("Verified_", species_code, "_Genotypes_Import.csv")), show_col_types = FALSE)
-  groups    <- read_csv(file.path(base_dir,"Pedigree", paste0("Verified_", species_code, "_Groups_Import.csv")), show_col_types = FALSE)
+  families  <- read_csv(file.path(base_dir,"Pedigree", paste0("Verified_", current_series, "_", species_code, "_Families_Import.csv")), show_col_types = FALSE)
+  genotypes <- read_csv(file.path(base_dir,"Pedigree", paste0("Verified_", current_series, "_", species_code, "_Genotypes_Import.csv")), show_col_types = FALSE)
+  groups    <- read_csv(file.path(base_dir,"Pedigree", paste0("Verified_", current_series, "_", species_code, "_Groups_Import.csv")), show_col_types = FALSE)
   
   crosses <- families %>% filter(Stage == 4, Mum_name != "Unknown", Dad_name != "Unknown")
   edges_mum <- crosses %>% select(from = Mum_name, to = Family_name)

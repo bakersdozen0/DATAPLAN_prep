@@ -93,8 +93,10 @@ parse_xlsx_design_file <- function(filepath, exp_prefix, spp_code) {
       Control_Name = if_else(Is_Control, str_trim(str_replace(Clean_Seedlot, control_regex, "")), NA_character_),
       Family_name = case_when(
         !is.na(Control_Name) ~ paste0(prefix_low, Control_Name),
-        # If the Dad has ANY letters, assume it's a special mix (OP, PO, OR, etc.) and don't add the species code
+        # OP/Mix Logic
         !is.na(Paternal_ID) & str_detect(Paternal_ID, "[A-Za-z]") ~ paste0(prefix_low, Maternal_ID, "_", Paternal_ID),
+        # MISSING CP LOGIC INJECTED HERE:
+        !is.na(Maternal_ID) & !is.na(Paternal_ID) ~ paste0(prefix_low, Maternal_ID, "_", prefix_low, Paternal_ID),
         is.na(Seedlot) ~ paste0(exp_prefix, "_Filler"), TRUE ~ paste0(exp_prefix, "_Filler")
       )
     )
