@@ -30,8 +30,8 @@ source(here("R", "ASCII_diagnostics.R"))
 # ============================================================================
 
 # GLOBAL SETTINGS
-BASE_DIR      <- "Z:/CSFCC/Forest Resource and Product Assessment and Improvement/NRS-Tree Improvement/CONIFERS/SITKA SPRUCE/psi_DATAPLAN_prep/Latest_Series"
-TRIAL_SERIES  <- "SS P91 5 Polycrosses" # "High GCA Fullsib P85-P87 experiments" / "Backwards selected Fullsib P96-P99 experiments"/ "Population_Studies" /"Trials" / "Diallel"
+BASE_DIR      <- "C:/Users/james.baker/Forest Research/TW CBC-TBA-NextGenBritishConifers - Share/Sitka"
+TRIAL_SERIES  <- "High GCA Fullsib P85-P87 experiments" # "High GCA Fullsib P85-P87 experiments" / "Backwards selected Fullsib P96-P99 experiments"/ "Population_Studies" /"Trials" / "Diallel"
 TARGET_DIR    <- file.path(BASE_DIR, TRIAL_SERIES) # for user legibility 
 TARGET_TRIALS <- NULL # set to NULL to run on all experiments in trial_series directory, or to a list of trials that you want to test: e.g. c("Craigellachie 49", "Ae 58")
 
@@ -55,9 +55,9 @@ FORCE_GLOBAL_OVERRIDE <- FALSE
 # PEDIGREE SPECIFIC
 HAS_EXISTING_DB <- TRUE 
 EXISTING_DIR    <- file.path(BASE_DIR, "Backwards Selected Fullsib P96-P99 experiments")
-FOUNDERS_FILE   <- paste0(SPECIES_CODE, "_tibdb_clones.csv") 
-CONTROLS_FILE   <- "dataplan_family_control_import.csv" 
-OP_FAM_FILE     <- paste0(SPECIES_CODE, "_OP_Families.xlsx")
+FOUNDERS_FILE   <- file.path(BASE_DIR,"Pedigree",paste0(SPECIES_CODE, "_tibdb_clones.csv"))
+CONTROLS_FILE   <- file.path(BASE_DIR,"Pedigree","dataplan_family_control_import.csv") 
+OP_FAM_FILE     <- file.path(BASE_DIR,"Pedigree",paste0(SPECIES_CODE, "_OP_Families.xlsx"))
 
 # ============================================================================
 #### EXECUTION BLOCKS ####
