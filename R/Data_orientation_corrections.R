@@ -43,7 +43,7 @@ get_traversal_path <- function(layout_mat, start_corner="top_left", direction="h
 #
 #### 3. BATCH PROCESSING LOOP ####
 # 
-run_traversal_audit <- function(wide_data_csv, plot_type, baseline_trait, test_traits, grid_rows = 8, grid_cols = 1, expect_negative_cor = FALSE, use_corrected_data = FALSE) {
+run_traversal_audit <- function(wide_data_csv, plot_type, baseline_trait, test_traits, grid_rows = 8, grid_cols = 1, expect_negative_cor = FALSE, use_corrected_data = FALSE,force_global_override=FALSE) {
   
   message(paste("Loading master data from:", basename(wide_data_csv)))
   

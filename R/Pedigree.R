@@ -281,7 +281,7 @@ run_pedigree_builder <- function(base_dir, pending_dir, existing_dir, species_co
     db_genos_char
   ) %>% distinct(Genotype_name, .keep_all = TRUE)
   
-  ro_families <- universal_families %>%
+  ro_families <- all_families %>%
     filter(!str_detect(Family_name, "(?i)Founders")) %>% 
     left_join(universal_genotypes %>% select(Genotype_name, Mum_lat = Ortet_lat, Mum_orig = Ortet_origin), 
               by = c("Mum_name" = "Genotype_name")) %>%
@@ -322,6 +322,7 @@ run_pedigree_builder <- function(base_dir, pending_dir, existing_dir, species_co
   }
   
   # Diagnostic Investigation: Ro_north_unk Contributors
+  cat("\n--- Investigating why families were assigned to Ro_north_unk (also the fallback option) ---\n")
   north_unk_investigation <- ro_families %>%
     filter(Mum_ro == "North_Unk" | Dad_ro == "North_Unk") %>%
     mutate(
