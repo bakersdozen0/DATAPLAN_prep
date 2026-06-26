@@ -717,37 +717,86 @@ run_dataplan_pipeline <- function(base_dir, trial_series, traits_file, plot_type
         mutate(Trait = case_when(!is.na(trait_code_DP) & !is.na(Age) ~ paste0(trait_code_DP, "_", Age), !is.na(trait_code_DP) & is.na(Age) ~ trait_code_DP, TRUE ~ Trait_Orig)) %>%
         select(Plot, Tree, Trait, Value_Char, Value_Num, UnitCode, Trait_Orig, Age, Prefix, Date) 
       
-      # Additional Data (AD Files)
-      ad_files <- dir_ls(exp_path, regexp = "(?i)_AD_(\\d+)\\.(csv|xlsx)$")
+      # Additional Data (AD Files) - Dynamic Header Parsing
+      # Matches any file with "_AD" in the name, with or without a number
+      ad_files <- dir_ls(exp_path, regexp = "(?i)_AD.*\\.(csv|xlsx)$")
+      
       if (length(ad_files) > 0) {
         for (ad_path in ad_files) {
-          ad_age <- str_extract(basename(ad_path), "(?i)_AD_(\\d+)") %>% str_extract("\\d+")
-          ad_age <- str_pad(ad_age, width = 2, pad = "0") # <--- FORCES LEADING ZEROS
           message(paste("  -> Loading Additional Data:", basename(ad_path)))
+          
+          # Read the file
           ad_raw <- if (str_detect(basename(ad_path), "(?i)\\.csv$")) read_csv(ad_path, col_types = cols(.default = "c")) else read_excel(ad_path, col_types = "text")
           
-          names(ad_raw) <- str_to_upper(names(ad_raw))
-          if("PLOT" %in% names(ad_raw)) ad_raw <- rename(ad_raw, Plot = PLOT)
-          if("TREE" %in% names(ad_raw)) ad_raw <- rename(ad_raw, Tree = TREE)
-          if("STEM" %in% names(ad_raw)) ad_raw <- rename(ad_raw, Tree = STEM)
+          # Standardize standard Plot/Tree columns
+          names(ad_raw) <- str_to_title(names(ad_raw))
+          if("Stem" %in% names(ad_raw)) ad_raw <- rename(ad_raw, Tree = Stem)
+          if("Rep" %in% names(ad_raw)) ad_raw <- rename(ad_raw, Block = Rep)
+          
+          # Handle Plot-Only Data: If no Tree column exists, assume plot-level data and assign to Tree 1
+          if (!"Tree" %in% names(ad_raw)) {
+            message("     -> No Tree column found. Assuming Plot-level data and assigning to Tree 1.")
+            ad_raw <- ad_raw %>% mutate(Tree = "1")
+          }
           
           if ("Plot" %in% names(ad_raw)) {
-            cols_to_exclude <- names(ad_raw)[names(ad_raw) %in% c("Plot", "Tree", "BLOCK", "REP")]
-            ad_long_raw <- ad_raw %>% pivot_longer(cols = -any_of(cols_to_exclude), names_to = "Header_Original", values_to = "Value_Char") %>% filter(!is.na(Value_Char))
+            cols_to_exclude <- names(ad_raw)[names(ad_raw) %in% c("Plot", "Tree", "Block", "Subblock")]
+            
+            # Pivot all other columns into long format
+            ad_long_raw <- ad_raw %>% 
+              pivot_longer(cols = -any_of(cols_to_exclude), names_to = "Header_Original", values_to = "Value_Char") %>% 
+              filter(!is.na(Value_Char))
             
             if (nrow(ad_long_raw) > 0) {
+              
+              # --- DYNAMIC HEADER PARSING & MAPPING ---
               unique_headers <- unique(ad_long_raw$Header_Original)
+              
               header_mapping <- map_dfr(unique_headers, function(h) {
-                clean_h <- str_remove_all(str_to_upper(h), "[^A-Z0-9]")
-                match <- trait_map %>% mutate(m = str_remove_all(str_to_upper(trait_code_FR), "[^A-Z0-9]")) %>% filter(clean_h == m) %>% slice(1)
-                if(nrow(match) == 0) match <- trait_map %>% mutate(m = str_remove_all(str_to_upper(trait_code_FR), "[^A-Z0-9]")) %>% filter(str_starts(clean_h, m)) %>% slice(1)
-                if(nrow(match) > 0) tibble(Header_Original = h, Code_DP = match$trait_code_DP, Key_FR = match$trait_code_FR) else tibble(Header_Original = h, Code_DP = replace_na(str_to_upper(str_extract(h, "^[A-Z]+")), h), Key_FR = h)
+                # 1. Separate Prefix and Age from the header (e.g., "Ht_15" -> "Ht" and "15")
+                raw_prefix <- str_extract(h, "^[A-Za-z]+") 
+                extracted_age <- str_extract(h, "\\d+$")
+                
+                clean_prefix <- str_to_upper(raw_prefix)
+                
+                # 2. Look up the prefix in the translation map
+                match <- trait_map %>% mutate(m = str_to_upper(trait_code_FR)) %>% filter(clean_prefix == m) %>% slice(1)
+                if(nrow(match) == 0) match <- trait_map %>% mutate(m = str_to_upper(trait_code_FR)) %>% filter(str_starts(clean_prefix, m)) %>% slice(1)
+                
+                # 3. Get the correct DP code (Fallback to the raw prefix if not found in map)
+                code_dp <- if(nrow(match) > 0) match$trait_code_DP else replace_na(clean_prefix, h)
+                key_fr <- if(nrow(match) > 0) match$trait_code_FR else h
+                
+                tibble(
+                  Header_Original = h, 
+                  Code_DP = code_dp, 
+                  Key_FR = key_fr,
+                  Header_Age = extracted_age
+                )
               })
               
-              ad_long <- ad_long_raw %>% left_join(header_mapping, by = "Header_Original") %>%
-                mutate(Plot = suppressWarnings(as.character(Plot)), Tree = if("Tree" %in% names(.)) suppressWarnings(as.numeric(Tree)) else 1,
-                       Value_Num = suppressWarnings(as.numeric(Value_Char)), Age = ad_age, Trait = paste0(Code_DP, "_", Age), Prefix = Key_FR, Trait_Orig = Header_Original, UnitCode = "", Date = as.Date(NA)) %>%
+              # --- REASSEMBLY ---
+              ad_long <- ad_long_raw %>% 
+                left_join(header_mapping, by = "Header_Original") %>%
+                mutate(
+                  Plot = suppressWarnings(as.character(Plot)), 
+                  Tree = suppressWarnings(as.numeric(Tree)),
+                  Value_Num = suppressWarnings(as.numeric(Value_Char)), 
+                  
+                  # Format the age (pads single digits like "9" to "09")
+                  Age = if_else(!is.na(Header_Age), str_pad(Header_Age, width = 2, pad = "0"), NA_character_),
+                  
+                  # Reassemble the final Trait name (e.g., HT_15)
+                  Trait = if_else(!is.na(Age), paste0(Code_DP, "_", Age), Code_DP),
+                  
+                  Prefix = Key_FR, 
+                  Trait_Orig = Header_Original, 
+                  UnitCode = "", 
+                  Date = as.Date(NA)
+                ) %>%
                 select(any_of(names(exp_data_long))) 
+              
+              # Append to the master long dataset
               exp_data_long <- bind_rows(exp_data_long, ad_long)
             }
           }
